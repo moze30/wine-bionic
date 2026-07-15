@@ -84,6 +84,13 @@ static uint32_t wine_vk_count_struct_(void *s, VkStructureType t)
 
 const struct vulkan_funcs *vk_funcs;
 
+static void *wine_vk_get_host_instance_proc_addr(VkInstance instance, const char *name)
+{
+    if (!strcmp(name, "vkGetPhysicalDeviceCooperativeVectorPropertiesNV"))
+        return NULL;
+    return (void *)vk_funcs->p_vkGetInstanceProcAddr(instance, name);
+}
+
 static int vulkan_object_compare(const void *key, const struct rb_entry *entry)
 {
     struct vulkan_object *object = RB_ENTRY_VALUE(entry, struct vulkan_object, entry);
@@ -919,6 +926,9 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice client_physical_device, const VkDe
     ALL_VK_DEVICE_FUNCS
 #undef USE_VK_FUNC
 
+    device->obj.p_vkCreateSwapchainKHR = (void *)vk_funcs->p_vkGetInstanceProcAddr(
+        instance->host.instance, "vkCreateSwapchainKHR");
+
     for (i = 0; i < create_info_host.queueCreateInfoCount; i++)
         wine_vk_device_init_queues(device, create_info_host.pQueueCreateInfos + i);
 
@@ -981,7 +991,7 @@ VkResult wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
      * ICD may support.
      */
 #define USE_VK_FUNC(name) \
-    instance->obj.p_##name = (void *)vk_funcs->p_vkGetInstanceProcAddr(instance->obj.host.instance, #name);
+    instance->obj.p_##name = wine_vk_get_host_instance_proc_addr(instance->obj.host.instance, #name);
     ALL_VK_INSTANCE_FUNCS
 #undef USE_VK_FUNC
 
