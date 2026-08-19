@@ -2224,7 +2224,7 @@ static HWND *list_children_from_point( HWND hwnd, POINT pt )
  *
  * Find the window and hittest for a given point.
  */
-HWND window_from_point( HWND hwnd, POINT pt, INT *hittest )
+static HWND window_from_point_internal( HWND hwnd, POINT pt, INT *hittest )
 {
     int i, res;
     HWND ret, *list;
@@ -2243,7 +2243,6 @@ HWND window_from_point( HWND hwnd, POINT pt, INT *hittest )
     for (i = 0; list[i]; i++)
     {
         LONG style = get_window_long( list[i], GWL_STYLE );
-
         /* If window is minimized or disabled, return at once */
         if (style & WS_DISABLED)
         {
@@ -2269,6 +2268,11 @@ HWND window_from_point( HWND hwnd, POINT pt, INT *hittest )
     free( list );
     TRACE( "scope %p (%d,%d) returning %p\n", hwnd, (int)pt.x, (int)pt.y, ret );
     return ret;
+}
+
+HWND window_from_point( HWND hwnd, POINT pt, INT *hittest )
+{
+    return window_from_point_internal( hwnd, pt, hittest );
 }
 
 /*******************************************************************

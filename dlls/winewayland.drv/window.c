@@ -195,6 +195,7 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
     HWND parent = NtUserGetAncestor(data->hwnd, GA_PARENT);
     BOOL visible, xdg_visible;
     RECT clip;
+    WCHAR text[1024];
 
     TRACE("hwnd=%p\n", data->hwnd);
 
@@ -223,7 +224,16 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
         /* If the window is a visible toplevel make it a wayland
          * xdg_toplevel. Otherwise keep it role-less to avoid polluting the
          * compositor with empty xdg_toplevels. */
-        if (visible) wayland_surface_make_toplevel(surface);
+        if (visible)
+        {
+            wayland_surface_make_toplevel(surface);
+            if (surface->xdg_toplevel)
+            {
+                if (!NtUserInternalGetWindowText(data->hwnd, text, ARRAY_SIZE(text)))
+                    text[0] = 0;
+                wayland_surface_set_title(surface, text);
+            }
+        }
     }
 
     wayland_win_data_get_config(data, &surface->window);
@@ -481,6 +491,9 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
     data->client_rect = *client_rect;
     data->managed = managed;
 
+    if (NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)
+        surface = NULL;
+
     if (surface) window_surface_add_ref(surface);
     if (data->window_surface) window_surface_release(data->window_surface);
     data->window_surface = surface;
@@ -650,6 +663,22 @@ LRESULT WAYLAND_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 
     return NtUserMessageCall(hwnd, msg, wp, lp, 0, NtUserDefWindowProc, FALSE);
+}
+
+/*****************************************************************
+ *              WAYLAND_SetWindowText
+ */
+void WAYLAND_SetWindowText(HWND hwnd, LPCWSTR text)
+{
+    struct wayland_surface *surface = wayland_surface_lock_hwnd(hwnd);
+
+    TRACE("hwnd=%p text=%s\n", hwnd, wine_dbgstr_w(text));
+
+    if (surface)
+    {
+        if (surface->xdg_toplevel) wayland_surface_set_title(surface, text);
+        pthread_mutex_unlock(&surface->mutex);
+    }
 }
 
 static enum xdg_toplevel_resize_edge hittest_to_resize_edge(WPARAM hittest)

@@ -51,6 +51,7 @@
  *          Globals
  */
 
+extern char *process_name;
 extern struct wayland process_wayland;
 
 /**********************************************************************
@@ -97,6 +98,10 @@ struct wayland_pointer
     struct zwp_relative_pointer_v1 *zwp_relative_pointer_v1;
     HWND focused_hwnd;
     HWND constraint_hwnd;
+    HCURSOR latest_hcursor;
+    BOOL latest_hcursor_valid;
+    POINT last_cursor_pos;
+    BOOL last_cursor_pos_valid;
     uint32_t enter_serial;
     uint32_t button_serial;
     struct wayland_cursor cursor;
@@ -202,6 +207,7 @@ struct wayland_surface
     struct wayland_client_surface *client;
     int buffer_width, buffer_height;
     HCURSOR hcursor;
+    BOOL hcursor_valid;
 };
 
 struct wayland_shm_buffer
@@ -256,6 +262,7 @@ void wayland_surface_coords_to_window(struct wayland_surface *surface,
 struct wayland_client_surface *wayland_surface_get_client(struct wayland_surface *surface);
 BOOL wayland_client_surface_release(struct wayland_client_surface *client);
 void wayland_surface_ensure_contents(struct wayland_surface *surface);
+void wayland_surface_set_title(struct wayland_surface *surface, LPCWSTR title);
 
 /**********************************************************************
  *          Wayland SHM buffer
@@ -320,6 +327,7 @@ BOOL WAYLAND_ClipCursor(const RECT *clip, BOOL reset);
 LRESULT WAYLAND_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 void WAYLAND_DestroyWindow(HWND hwnd);
 void WAYLAND_SetCursor(HWND hwnd, HCURSOR hcursor);
+void WAYLAND_SetWindowText(HWND hwnd, LPCWSTR text);
 LRESULT WAYLAND_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam);
 BOOL WAYLAND_UpdateDisplayDevices(const struct gdi_device_manager *device_manager,
                                   BOOL force, void *param);

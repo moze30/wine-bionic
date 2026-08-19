@@ -2491,7 +2491,10 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     event.paramH  = msg->pt.y;
     call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, sizeof(event) );
 
-    if (!check_hwnd_filter( msg, hwnd_filter )) return FALSE;
+    if (!check_hwnd_filter( msg, hwnd_filter ))
+    {
+        return FALSE;
+    }
 
     pt = msg->pt;
     message = msg->message;
@@ -2513,7 +2516,6 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
         }
     }
     msg->lParam = MAKELONG( pt.x, pt.y );
-
     /* translate double clicks */
 
     if (msg->message == WM_LBUTTONDOWN ||

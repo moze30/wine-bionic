@@ -30,6 +30,8 @@
 #include <stdlib.h>
 
 #include "waylanddrv.h"
+#include "ntuser.h"
+#include "winuser.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
@@ -74,8 +76,10 @@ static void pointer_handle_motion_internal(wl_fixed_t sx, wl_fixed_t sy)
 
     pthread_mutex_unlock(&surface->mutex);
 
-    /* Hardware input events are in physical coordinates. */
-    if (!NtUserLogicalToPerMonitorDPIPhysicalPoint(hwnd, &screen)) return;
+    pthread_mutex_lock(&process_wayland.pointer.mutex);
+    process_wayland.pointer.last_cursor_pos = screen;
+    process_wayland.pointer.last_cursor_pos_valid = TRUE;
+    pthread_mutex_unlock(&process_wayland.pointer.mutex);
 
     input.type = INPUT_MOUSE;
     input.mi.dx = screen.x;
@@ -152,7 +156,10 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
 {
     struct wayland_pointer *pointer = &process_wayland.pointer;
     INPUT input = {0};
-    HWND hwnd;
+    POINT cursor = {0}, client;
+    HWND hwnd, input_hwnd;
+    POINT last_cursor;
+    BOOL last_cursor_valid;
 
     if (!(hwnd = wayland_pointer_get_focused_hwnd())) return;
 
@@ -183,9 +190,26 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
                              serial : 0;
     pthread_mutex_unlock(&pointer->mutex);
 
-    TRACE("hwnd=%p button=%#x state=%u\n", hwnd, button, state);
+    pthread_mutex_lock(&pointer->mutex);
+    last_cursor = pointer->last_cursor_pos;
+    last_cursor_valid = pointer->last_cursor_pos_valid;
+    pthread_mutex_unlock(&pointer->mutex);
+    if (last_cursor_valid) NtUserSetCursorPos(last_cursor.x, last_cursor.y);
 
-    __wine_send_input(hwnd, &input, NULL);
+    input_hwnd = hwnd;
+    if (NtUserGetCursorPos(&cursor))
+    {
+        client = cursor;
+        if (NtUserScreenToClient(hwnd, &client))
+        {
+            HWND child = NtUserChildWindowFromPointEx(hwnd, client.x, client.y,
+                                                       CWP_SKIPINVISIBLE | CWP_SKIPDISABLED |
+                                                       CWP_SKIPTRANSPARENT);
+            if (child && child != hwnd) input_hwnd = child;
+        }
+    }
+
+    __wine_send_input(input_hwnd, &input, NULL);
 }
 
 static void pointer_handle_axis(void *data, struct wl_pointer *wl_pointer,
@@ -256,14 +280,11 @@ static void relative_pointer_v1_relative_motion(void *data,
 {
     INPUT input = {0};
     HWND hwnd;
-    POINT screen, origin;
+    POINT screen;
     struct wayland_surface *surface;
-    RECT window_rect;
 
     if (!(hwnd = wayland_pointer_get_focused_hwnd())) return;
     if (!(surface = wayland_surface_lock_hwnd(hwnd))) return;
-
-    window_rect = surface->window.rect;
 
     wayland_surface_coords_to_window(surface,
                                      wl_fixed_to_double(dx),
@@ -271,42 +292,6 @@ static void relative_pointer_v1_relative_motion(void *data,
                                      (int *)&screen.x, (int *)&screen.y);
 
     pthread_mutex_unlock(&surface->mutex);
-
-    /* We clip the relative motion within the window rectangle so that
-     * the NtUserLogicalToPerMonitorDPIPhysicalPoint calls later succeed.
-     * TODO: Avoid clipping by using a more versatile dpi mapping function. */
-    if (screen.x >= 0)
-    {
-        origin.x = window_rect.left;
-        screen.x += origin.x;
-        if (screen.x >= window_rect.right) screen.x = window_rect.right - 1;
-    }
-    else
-    {
-        origin.x = window_rect.right;
-        screen.x += origin.x;
-        if (screen.x < window_rect.left) screen.x = window_rect.left;
-    }
-
-    if (screen.y >= 0)
-    {
-        origin.y = window_rect.top;
-        screen.y += origin.y;
-        if (screen.y >= window_rect.bottom) screen.y = window_rect.bottom - 1;
-    }
-    else
-    {
-        origin.y = window_rect.bottom;
-        screen.y += origin.y;
-        if (screen.y < window_rect.top) screen.y = window_rect.top;
-    }
-
-    /* Transform the relative motion from window coordinates to physical
-     * coordinates required for the input event. */
-    if (!NtUserLogicalToPerMonitorDPIPhysicalPoint(hwnd, &screen)) return;
-    if (!NtUserLogicalToPerMonitorDPIPhysicalPoint(hwnd, &origin)) return;
-    screen.x -= origin.x;
-    screen.y -= origin.y;
 
     input.type = INPUT_MOUSE;
     input.mi.dx = screen.x;
@@ -332,6 +317,9 @@ void wayland_pointer_init(struct wl_pointer *wl_pointer)
     pthread_mutex_lock(&pointer->mutex);
     pointer->wl_pointer = wl_pointer;
     pointer->focused_hwnd = NULL;
+    pointer->latest_hcursor = NULL;
+    pointer->latest_hcursor_valid = FALSE;
+    pointer->last_cursor_pos_valid = FALSE;
     pointer->enter_serial = 0;
     pthread_mutex_unlock(&pointer->mutex);
     wl_pointer_add_listener(pointer->wl_pointer, &pointer_listener, NULL);
@@ -659,6 +647,12 @@ clear_cursor:
     }
 }
 
+static HCURSOR wayland_pointer_get_default_cursor(void)
+{
+    return LoadImageW(0, MAKEINTRESOURCEW(IDC_ARROW), IMAGE_CURSOR,
+                      0, 0, LR_SHARED | LR_DEFAULTSIZE);
+}
+
 static void wayland_set_cursor(HWND hwnd, HCURSOR hcursor, BOOL use_hcursor)
 {
     struct wayland_pointer *pointer = &process_wayland.pointer;
@@ -670,9 +664,16 @@ static void wayland_set_cursor(HWND hwnd, HCURSOR hcursor, BOOL use_hcursor)
     if ((surface = wayland_surface_lock_hwnd(hwnd)))
     {
         scale = surface->window.scale;
-        if (use_hcursor) surface->hcursor = hcursor;
-        else hcursor = surface->hcursor;
-        use_hcursor = TRUE;
+        if (use_hcursor)
+        {
+            surface->hcursor = hcursor;
+            surface->hcursor_valid = TRUE;
+        }
+        else if (surface->hcursor_valid)
+        {
+            hcursor = surface->hcursor;
+            use_hcursor = TRUE;
+        }
         pthread_mutex_unlock(&surface->mutex);
     }
     else
@@ -681,6 +682,22 @@ static void wayland_set_cursor(HWND hwnd, HCURSOR hcursor, BOOL use_hcursor)
     }
 
     pthread_mutex_lock(&pointer->mutex);
+    if (use_hcursor)
+    {
+        pointer->latest_hcursor = hcursor;
+        pointer->latest_hcursor_valid = TRUE;
+    }
+    else if (pointer->latest_hcursor_valid)
+    {
+        hcursor = pointer->latest_hcursor;
+        use_hcursor = TRUE;
+    }
+    else
+    {
+        /* A surface from another process may not have received SetCursor yet. */
+        hcursor = wayland_pointer_get_default_cursor();
+        use_hcursor = !!hcursor;
+    }
     if (pointer->focused_hwnd == hwnd)
     {
         if (use_hcursor) wayland_pointer_update_cursor_buffer(hcursor, scale);

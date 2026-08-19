@@ -106,6 +106,7 @@ static BOOL show_systray = TRUE, enable_shell, enable_taskbar;
 static int icon_cx, icon_cy, tray_width, tray_height;
 static int start_button_width, taskbar_button_width;
 static WCHAR start_label[50];
+static WNDPROC taskbar_button_orig_proc;
 
 static struct icon *balloon_icon;
 static HWND balloon_window;
@@ -148,6 +149,11 @@ static WNDCLASSEXW tray_icon_class =
 
 static void do_hide_systray(void);
 static void do_show_systray(void);
+
+static LRESULT WINAPI taskbar_button_wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    return CallWindowProcW( taskbar_button_orig_proc, hwnd, msg, wparam, lparam );
+}
 
 /* Retrieves icon record by owner window and ID */
 static struct icon *get_icon(HWND owner, UINT id)
@@ -921,7 +927,13 @@ static void add_taskbar_button( HWND hwnd )
     if (!(win = malloc( sizeof(*win) ))) return;
     win->hwnd = hwnd;
     win->button = CreateWindowW( WC_BUTTONW, NULL, WS_CHILD | BS_OWNERDRAW,
-                                 0, 0, 0, 0, tray_window, (HMENU)hwnd, 0, 0 );
+                                  0, 0, 0, 0, tray_window, (HMENU)hwnd, 0, 0 );
+    if (win->button)
+    {
+        WNDPROC proc = (WNDPROC)SetWindowLongPtrW( win->button, GWLP_WNDPROC,
+                                                   (LONG_PTR)taskbar_button_wndproc );
+        if (!taskbar_button_orig_proc) taskbar_button_orig_proc = proc;
+    }
     list_add_tail( &taskbar_buttons, &win->entry );
 }
 
