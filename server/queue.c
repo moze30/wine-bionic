@@ -2816,16 +2816,36 @@ DECL_HANDLER(send_hardware_message)
     unsigned int origin = (req->flags & SEND_HWMSG_INJECTED ? IMO_INJECTED : IMO_HARDWARE);
     struct msg_queue *sender = get_current_queue();
 
-    if (!(desktop = get_thread_desktop( current, 0 ))) return;
+    if (!(desktop = get_thread_desktop( current, 0 )) && req->win &&
+        (thread = get_window_thread( req->win )) && thread->process == current->process)
+    {
+        desktop = (struct desktop *)grab_object( thread->queue->input->desktop );
+    }
+
+    if (!desktop)
+    {
+        return;
+    }
 
     if (req->win)
     {
-        if (!(thread = get_window_thread( req->win ))) return;
+        if (!thread && !(thread = get_window_thread( req->win )))
+        {
+            return;
+        }
         if (desktop != thread->queue->input->desktop)
         {
-            /* don't allow queuing events to a different desktop */
-            release_object( desktop );
-            return;
+            if (thread->process == current->process)
+            {
+                release_object( desktop );
+                desktop = (struct desktop *)grab_object( thread->queue->input->desktop );
+            }
+            else
+            {
+                /* don't allow queuing events to a different desktop */
+                release_object( desktop );
+                return;
+            }
         }
     }
 

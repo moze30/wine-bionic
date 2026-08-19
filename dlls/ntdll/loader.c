@@ -1087,7 +1087,6 @@ void * WINAPI RtlFindExportedRoutineByName( HMODULE module, const char *name )
  */
 static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LPCWSTR load_path, WINE_MODREF **pwm )
 {
-    static unsigned int iat_log_count;
     BOOL system = current_modref->system || (current_modref->ldr.Flags & LDR_WINE_INTERNAL);
     NTSTATUS status;
     WINE_MODREF *wmImp;
@@ -1137,12 +1136,6 @@ static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LP
     protect_size *= sizeof(*thunk_list);
     status = NtProtectVirtualMemory( NtCurrentProcess(), &protect_base,
                                      &protect_size, PAGE_READWRITE, &protect_old );
-    if (iat_log_count < 16)
-    {
-        ERR( "IAT write protection %p-%p status %#lx old %#lx\n", protect_base,
-             (char *)protect_base + protect_size, status, protect_old );
-        if (++iat_log_count == 16) ERR( "IAT protection logging suppressed\n" );
-    }
 
     imp_mod = wmImp->ldr.DllBase;
     exports = RtlImageDirectoryEntryToData( imp_mod, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size );
@@ -1215,12 +1208,6 @@ done:
     /* restore old protection of the import address table */
     status = NtProtectVirtualMemory( NtCurrentProcess(), &protect_base, &protect_size,
                                      protect_old, &protect_old );
-    if (iat_log_count < 32)
-    {
-        ERR( "IAT restore protection %p-%p status %#lx old %#lx\n", protect_base,
-             (char *)protect_base + protect_size, status, protect_old );
-        if (++iat_log_count == 32) ERR( "IAT protection logging suppressed\n" );
-    }
     *pwm = wmImp;
     return TRUE;
 }

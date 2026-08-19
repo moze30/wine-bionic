@@ -217,7 +217,6 @@ static const size_t view_block_size = 0x100000;
 static void *preload_reserve_start;
 static void *preload_reserve_end;
 static BOOL force_exec_prot;  /* whether to force PROT_EXEC on all PROT_READ mmaps */
-static unsigned int image_protect_log_count;
 
 struct range_entry
 {
@@ -5023,13 +5022,6 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T 
     }
     else status = STATUS_INVALID_PARAMETER;
 
-    if (view && (view->protect & SEC_IMAGE) && image_protect_log_count < 32)
-    {
-        ERR( "image protect %p-%p new %#x old %#x status %#x vprot %#x view %#x\n",
-             base, base + size, new_prot, old, status, vprot, view->protect );
-        if (++image_protect_log_count == 32)
-            ERR( "image protection logging suppressed after 32 entries\n" );
-    }
 
     if (!status) VIRTUAL_DEBUG_DUMP_VIEW( view );
 

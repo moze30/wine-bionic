@@ -156,8 +156,7 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
 {
     struct wayland_pointer *pointer = &process_wayland.pointer;
     INPUT input = {0};
-    POINT cursor = {0}, client;
-    HWND hwnd, input_hwnd;
+    HWND hwnd;
     POINT last_cursor;
     BOOL last_cursor_valid;
 
@@ -196,20 +195,14 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
     pthread_mutex_unlock(&pointer->mutex);
     if (last_cursor_valid) NtUserSetCursorPos(last_cursor.x, last_cursor.y);
 
-    input_hwnd = hwnd;
-    if (NtUserGetCursorPos(&cursor))
+    if (last_cursor_valid)
     {
-        client = cursor;
-        if (NtUserScreenToClient(hwnd, &client))
-        {
-            HWND child = NtUserChildWindowFromPointEx(hwnd, client.x, client.y,
-                                                       CWP_SKIPINVISIBLE | CWP_SKIPDISABLED |
-                                                       CWP_SKIPTRANSPARENT);
-            if (child && child != hwnd) input_hwnd = child;
-        }
+        input.mi.dx = last_cursor.x;
+        input.mi.dy = last_cursor.y;
+        input.mi.dwFlags |= MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     }
 
-    __wine_send_input(input_hwnd, &input, NULL);
+    __wine_send_input(hwnd, &input, NULL);
 }
 
 static void pointer_handle_axis(void *data, struct wl_pointer *wl_pointer,
