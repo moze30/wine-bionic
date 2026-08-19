@@ -1,0 +1,9 @@
+MODULE       = winewinfusion.drv
+UNIXLIB      = winewinfusion.so
+DELAYIMPORTS = winmm
+UNIX_CFLAGS  = $(WINFUSION_MIDI_CFLAGS)
+UNIX_LIBS    = $(WINFUSION_MIDI_LIBS) $(PTHREAD_LIBS)
+
+SOURCES = \
+	midi.c \
+	unixlib.c

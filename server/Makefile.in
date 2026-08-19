@@ -11,6 +11,7 @@ SOURCES = \
 	debugger.c \
 	device.c \
 	directory.c \
+	esync.c \
 	event.c \
 	fd.c \
 	file.c \
@@ -47,6 +48,7 @@ SOURCES = \
 	wineserver.man.in \
 	winstation.c
 
-UNIX_LIBS = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)
+UNIX_CFLAGS = $(INOTIFY_CFLAGS) $(WINFUSION_UTILS_CFLAGS)
+UNIX_LIBS = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS) $(WINFUSION_UTILS_LIBS)
 
 unicode_EXTRADEFS = -DNLSDIR="\"${nlsdir}\"" -DBIN_TO_NLSDIR=\"`${MAKEDEP} -R ${bindir} ${nlsdir}`\"
