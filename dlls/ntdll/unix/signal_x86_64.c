@@ -1980,6 +1980,10 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             /* send EXCEPTION_EXECUTE_FAULT only if data execution prevention is enabled */
             if (!(flags & MEM_EXECUTE_OPTION_DISABLE)) rec.ExceptionInformation[0] = EXCEPTION_READ_FAULT;
         }
+        ERR_(seh)( "page fault: code %#x access %#lx addr %p rip %016lx rsp %016lx err %#lx si_code %d rax %016lx rcx %016lx rdx %016lx\n",
+                   rec.ExceptionCode, rec.ExceptionInformation[0], siginfo->si_addr,
+                   context.c.Rip, context.c.Rsp, (ULONG_PTR)ERROR_sig(ucontext),
+                   siginfo->si_code, context.c.Rax, context.c.Rcx, context.c.Rdx );
         break;
     case TRAP_x86_ALIGNFLT:  /* Alignment check exception */
         if (EFL_sig(ucontext) & 0x00040000)

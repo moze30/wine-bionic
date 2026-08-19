@@ -708,9 +708,15 @@ static BOOL unix_to_win_locale( const char *unix_name, char *win_name )
 {
     static const char sep[] = "_.@";
     const char *extra = NULL;
+#ifdef __ANDROID__
+    const char *env_locale = getenv( "LC_ALL" );
+#endif
     char buffer[LOCALE_NAME_MAX_LENGTH];
     char *p, *country = NULL, *modifier = NULL;
 
+#ifdef __ANDROID__
+    if (env_locale && env_locale[0]) unix_name = env_locale;
+#endif
     if (!unix_name || !unix_name[0] || !strcmp( unix_name, "C" ))
     {
         unix_name = getenv( "LC_ALL" );

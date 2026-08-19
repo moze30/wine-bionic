@@ -3953,15 +3953,12 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
                         continue;
                     }
 
-                    todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                     ok(ret, "VirtualProtect error %ld, map %#lx, view %#lx, requested prot %#lx\n", GetLastError(), page_prot[i], view[j].prot, page_prot[k]);
-                    todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                     ok(old_prot == prev_prot, "got %#lx, expected %#lx\n", old_prot, prev_prot);
                     prev_prot = actual_prot;
 
                     ret = VirtualQuery(base, &info, sizeof(info));
                     ok(ret, "%ld: VirtualQuery failed %ld\n", j, GetLastError());
-                    todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                     ok(info.Protect == actual_prot,
                        "VirtualProtect wrong prot, map %#lx, view %#lx, requested prot %#lx got %#lx\n",
                        page_prot[i], view[j].prot, page_prot[k], info.Protect );
@@ -4016,7 +4013,6 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
             if (!anon_mapping && is_compatible_protection(alloc_prot, PAGE_WRITECOPY))
             {
                 ret = VirtualProtect(base, sec_flags & SEC_IMAGE ? si.dwPageSize : 2*si.dwPageSize, PAGE_WRITECOPY, &old_prot);
-                todo_wine_if(readonly && view[j].prot != PAGE_WRITECOPY)
                 ok(ret, "VirtualProtect error %ld, map %#lx, view %#lx\n", GetLastError(), page_prot[i], view[j].prot);
                 if (ret) *(DWORD*)base = 0xdeadbeef;
                 ret = VirtualQuery(base, &info, sizeof(info));
@@ -4035,7 +4031,6 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
                 {
                     ret = VirtualQuery((char*)base + si.dwPageSize, &info, sizeof(info));
                     ok(ret, "%ld: VirtualQuery failed %ld\n", j, GetLastError());
-                    todo_wine_if(readonly && view[j].prot != PAGE_WRITECOPY)
                     ok(info.Protect == PAGE_WRITECOPY, "wrong prot, map %#lx, view %#lx got %#lx\n",
                        page_prot[i], view[j].prot, info.Protect);
                 }
@@ -4055,9 +4050,7 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
                             continue;
                         }
 
-                        todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                         ok(ret, "VirtualProtect error %ld, map %#lx, view %#lx, requested prot %#lx\n", GetLastError(), page_prot[i], view[j].prot, page_prot[k]);
-                        todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                         ok(old_prot == prev_prot, "got %#lx, expected %#lx\n", old_prot, prev_prot);
 
                         ret = VirtualQuery(base, &info, sizeof(info));
