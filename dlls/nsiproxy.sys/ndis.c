@@ -312,6 +312,12 @@ static unsigned int update_if_table( void )
     struct if_nameindex *indices = if_nameindex(), *entry;
     unsigned int append_count = 0;
 
+    if (!indices)
+    {
+        WARN( "failed to enumerate network interfaces\n" );
+        return 0;
+    }
+
     for (entry = indices; entry->if_index; entry++)
     {
         if (!find_entry_from_index( entry->if_index ) && add_entry( entry->if_index, entry->if_name ))

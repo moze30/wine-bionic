@@ -61,6 +61,12 @@ static uint32_t wine_vk_count_struct_(void *s, VkStructureType t)
 
 static const struct vulkan_funcs *vk_funcs;
 
+static void *wine_vk_get_host_instance_proc_addr(VkInstance instance, const char *name)
+{
+    if (!strcmp(name, "vkGetPhysicalDeviceCooperativeVectorPropertiesNV")) return NULL;
+    return (void *)vk_funcs->p_vkGetInstanceProcAddr(instance, name);
+}
+
 #define WINE_VK_ADD_DISPATCHABLE_MAPPING(instance, client_handle, host_handle, object) \
     wine_vk_add_handle_mapping((instance), (uintptr_t)(client_handle), (uintptr_t)(host_handle), &(object)->mapping)
 #define WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, client_handle, host_handle, object) \
@@ -782,6 +788,9 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice phys_dev_handle, const VkDeviceCre
     ALL_VK_DEVICE_FUNCS()
 #undef USE_VK_FUNC
 
+    object->funcs.p_vkCreateSwapchainKHR = (void *)vk_funcs->p_vkGetInstanceProcAddr(
+            instance->host_instance, "vkCreateSwapchainKHR");
+
     /* We need to cache all queues within the device as each requires wrapping since queues are
      * dispatchable objects.
      */
@@ -864,7 +873,7 @@ VkResult wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
      * ICD may support.
      */
 #define USE_VK_FUNC(name) \
-    object->funcs.p_##name = (void *)vk_funcs->p_vkGetInstanceProcAddr(object->host_instance, #name);
+    object->funcs.p_##name = wine_vk_get_host_instance_proc_addr(object->host_instance, #name);
     ALL_VK_INSTANCE_FUNCS()
 #undef USE_VK_FUNC
 

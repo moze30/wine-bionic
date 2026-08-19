@@ -466,7 +466,7 @@ UINT WINAPI midiOutClose(HMIDIOUT hMidiOut)
 	return MMSYSERR_INVALHANDLE;
 
     dwRet = MMDRV_Close(wmld, MODM_CLOSE);
-    MMDRV_Free(hMidiOut, wmld);
+    if (dwRet == MMSYSERR_NOERROR) MMDRV_Free(hMidiOut, wmld);
 
     return dwRet;
 }
@@ -755,7 +755,7 @@ UINT WINAPI midiInClose(HMIDIIN hMidiIn)
 	return MMSYSERR_INVALHANDLE;
 
     dwRet = MMDRV_Close(wmld, MIDM_CLOSE);
-    MMDRV_Free(hMidiIn, wmld);
+    if (dwRet == MMSYSERR_NOERROR) MMDRV_Free(hMidiIn, wmld);
     return dwRet;
 }
 
