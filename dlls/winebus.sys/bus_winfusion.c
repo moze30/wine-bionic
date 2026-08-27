@@ -227,7 +227,6 @@ static struct winfusion_device *create_device(uint32_t id)
         .input = -1,
         .uid = id + 1,
         .is_gamepad = TRUE,
-        .is_hidraw = FALSE,
     };
     struct winfusion_device *impl;
 
