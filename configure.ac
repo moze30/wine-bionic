@@ -1940,6 +1940,34 @@ then
     then
         AC_MSG_ERROR([WinFusion Utils not found, cannot built with --enable-winfusion])
     fi
+    WINE_PACKAGE_FLAGS(WINFUSION_MIDI,[winfusion_midi_ipc],,,,
+        [AC_CHECK_HEADERS([shm/drivers/midi_driver.h],[],[WINFUSION_MIDI_LIBS=""])
+         AC_CHECK_LIB(winfusion_midi_ipc,midi_ipc_client_connect_from_env,[:],
+             [WINFUSION_MIDI_LIBS=""],[$WINFUSION_MIDI_LIBS $PTHREAD_LIBS])])
+    if test -z "$WINFUSION_MIDI_LIBS"
+    then
+        AC_MSG_ERROR([WinFusion MIDI IPC client not found, cannot build with --enable-winfusion])
+    fi
+    WINE_PACKAGE_FLAGS(WINFUSION_CONTROLLER,[winfusion_game_controller_ipc],,,,
+        [AC_CHECK_HEADERS([shm/drivers/game_controller_driver.h],[],[WINFUSION_CONTROLLER_LIBS=""])
+         AC_CHECK_LIB(winfusion_game_controller_ipc,game_controller_ipc_client_connect_from_env,[:],
+             [WINFUSION_CONTROLLER_LIBS=""],[$WINFUSION_CONTROLLER_LIBS $PTHREAD_LIBS])])
+    if test -z "$WINFUSION_CONTROLLER_LIBS"
+    then
+        AC_MSG_ERROR([WinFusion GameController IPC client not found, cannot build with --enable-winfusion])
+    fi
+    WINE_PACKAGE_FLAGS(WINFUSION_TASKMGR,[winfusion_task_manager_ipc],,,,
+        [AC_CHECK_HEADERS([shm/drivers/task_manager_driver.h],[],[WINFUSION_TASKMGR_LIBS=""])
+         AC_CHECK_LIB(winfusion_task_manager_ipc,task_manager_ipc_client_connect_from_env,[:],
+             [WINFUSION_TASKMGR_LIBS=""],[$WINFUSION_TASKMGR_LIBS $PTHREAD_LIBS])])
+    if test -z "$WINFUSION_TASKMGR_LIBS"
+    then
+        AC_MSG_ERROR([WinFusion TaskManager IPC client not found, cannot build with --enable-winfusion])
+    fi
+else
+    enable_winewinfusion_drv=no
+    enable_winfusiontm=no
+    enable_wftm=no
 fi
 
 dnl **** Check for gcc specific options ****
@@ -3375,6 +3403,8 @@ WINE_CONFIG_MAKEFILE(dlls/winepulse.drv)
 WINE_CONFIG_MAKEFILE(dlls/wineusb.sys)
 WINE_CONFIG_MAKEFILE(dlls/winevulkan)
 WINE_CONFIG_MAKEFILE(dlls/winewayland.drv)
+WINE_CONFIG_MAKEFILE(dlls/winewinfusion.drv)
+WINE_CONFIG_MAKEFILE(dlls/winfusiontm)
 WINE_CONFIG_MAKEFILE(dlls/winex11.drv)
 WINE_CONFIG_MAKEFILE(dlls/winexinput.sys)
 WINE_CONFIG_MAKEFILE(dlls/wing.dll16)
@@ -3643,6 +3673,7 @@ WINE_CONFIG_MAKEFILE(programs/winemenubuilder)
 WINE_CONFIG_MAKEFILE(programs/winemine)
 WINE_CONFIG_MAKEFILE(programs/winemsibuilder)
 WINE_CONFIG_MAKEFILE(programs/winepath)
+WINE_CONFIG_MAKEFILE(programs/wftm)
 WINE_CONFIG_MAKEFILE(programs/winetest)
 WINE_CONFIG_MAKEFILE(programs/winevdm)
 WINE_CONFIG_MAKEFILE(programs/winhelp.exe16)

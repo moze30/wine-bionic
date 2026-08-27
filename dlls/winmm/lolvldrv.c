@@ -55,6 +55,8 @@ static WINE_LLTYPE llTypes[MMDRV_MAX] = {
     { "WaveOut", 0, 0, -1 }
 };
 
+static INIT_ONCE drivers_lock_once = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION drivers_lock;
 static BOOL drivers_loaded;
 static int MMDrvsHi;
 static WINE_MM_DRIVER	MMDrvs[8];
@@ -62,11 +64,25 @@ static LPWINE_MLD	MM_MLDrvs[40];
 
 static void MMDRV_Init(void);
 
-static void MMDRV_InitSingleType(UINT type) {
-    if (!drivers_loaded) {
+static BOOL WINAPI MMDRV_InitLock(INIT_ONCE *once, void *param, void **context)
+{
+    (void)once;
+    (void)param;
+    (void)context;
+    InitializeCriticalSection(&drivers_lock);
+    return TRUE;
+}
+
+static void MMDRV_InitSingleType(UINT type)
+{
+    InitOnceExecuteOnce(&drivers_lock_once, MMDRV_InitLock, NULL, NULL);
+    EnterCriticalSection(&drivers_lock);
+    if (!drivers_loaded)
+    {
         drivers_loaded = TRUE;
         MMDRV_Init();
     }
+    LeaveCriticalSection(&drivers_lock);
 }
 
 /**************************************************************************
@@ -481,6 +497,9 @@ static	BOOL	MMDRV_Install(LPCSTR drvRegName, LPCSTR drvFileName, BOOL bIsMapper)
  */
 static void MMDRV_Init(void)
 {
+#ifdef __WINFUSION__
+    MMDRV_Install("winfusionmidi", "winewinfusion.drv", FALSE);
+#endif
     MMDRV_Install("mmdevapi", "mmdevapi.dll", FALSE);
     MMDRV_Install("wavemapper", "msacm32.drv", TRUE);
     MMDRV_Install("midimapper", "midimap.dll", TRUE);
