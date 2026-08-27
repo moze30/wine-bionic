@@ -24,6 +24,10 @@
 
 #include "config.h"
 
+#ifdef __WINFUSION__
+#include <winfusion_utils.h>
+#endif
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -216,7 +220,7 @@ struct mutex
 };
 C_ASSERT(sizeof(struct mutex) == 16);
 
-static char shm_name[29];
+static char shm_name[256];
 static int shm_fd;
 static volatile void *shm_addrs[8192];
 
@@ -569,12 +573,30 @@ void fsync_init(void)
     if (stat( config_dir, &st ) == -1)
         ERR("Cannot stat %s\n", config_dir);
 
+#ifdef __WINFUSION__
+    {
+        char *tmp_dir = get_winfusion_tmp_dir();
+
+        if (st.st_ino != (unsigned long)st.st_ino)
+            sprintf( shm_name, "%s/wine-%lx%08lx-fsync", tmp_dir,
+                     (unsigned long)((unsigned long long)st.st_ino >> 32),
+                     (unsigned long)st.st_ino );
+        else
+            sprintf( shm_name, "%s/wine-%lx-fsync", tmp_dir, (unsigned long)st.st_ino );
+        free( tmp_dir );
+    }
+#else
     if (st.st_ino != (unsigned long)st.st_ino)
         sprintf( shm_name, "/wine-%lx%08lx-fsync", (unsigned long)((unsigned long long)st.st_ino >> 32), (unsigned long)st.st_ino );
     else
         sprintf( shm_name, "/wine-%lx-fsync", (unsigned long)st.st_ino );
+#endif
 
+#ifdef __WINFUSION__
+    if ((shm_fd = open( shm_name, O_RDWR, 0644 )) == -1)
+#else
     if ((shm_fd = shm_open( shm_name, O_RDWR, 0644 )) == -1)
+#endif
     {
         /* probably the server isn't running with WINEFSYNC, tell the user and bail */
         if (errno == ENOENT)

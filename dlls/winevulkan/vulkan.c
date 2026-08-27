@@ -1229,6 +1229,11 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice client_physical_device, const VkDe
     ALL_VK_DEVICE_FUNCS
 #undef USE_VK_FUNC
 
+    /* resolve swapchain creation through the instance dispatch path, as
+     * GetDeviceProcAddr for swapchain entry points is unreliable under Box64 */
+    device->p_vkCreateSwapchainKHR = (void *)vk_funcs->p_vkGetInstanceProcAddr(
+        instance->host.instance, "vkCreateSwapchainKHR");
+
     instance->p_vkGetPhysicalDeviceQueueFamilyProperties(physical_device->host.physical_device, &props_count, device->queue_props);
 
     for (i = 0; i < create_info_host.queueCreateInfoCount; i++)
@@ -1307,7 +1312,7 @@ VkResult wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
      * ICD may support.
      */
 #define USE_VK_FUNC(name) \
-    instance->obj.p_##name = (void *)vk_funcs->p_vkGetInstanceProcAddr(instance->obj.host.instance, #name);
+    instance->obj.p_##name = wine_vk_get_host_instance_proc_addr(instance->obj.host.instance, #name);
     ALL_VK_INSTANCE_FUNCS
 #undef USE_VK_FUNC
 

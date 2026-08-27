@@ -1384,6 +1384,20 @@ static NTSTATUS iohid_driver_init(void)
     return bus_main_thread_start(&bus);
 }
 
+#ifdef __WINFUSION__
+static NTSTATUS winfusion_driver_init(void)
+{
+    struct bus_main_params bus =
+    {
+        .name = L"WinFusion",
+        .init_code = winfusion_init,
+        .wait_code = winfusion_wait,
+    };
+
+    return bus_main_thread_start(&bus);
+}
+#endif
+
 static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
@@ -1400,6 +1414,9 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         mouse_device_create();
         keyboard_device_create();
 
+#ifdef __WINFUSION__
+        winfusion_driver_init();
+#endif
         udev_driver_init();
         sdl_driver_init();
         iohid_driver_init();
@@ -1410,6 +1427,9 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_REMOVE_DEVICE:
+#ifdef __WINFUSION__
+        winebus_call(winfusion_stop, NULL);
+#endif
         winebus_call(sdl_stop, NULL);
         winebus_call(udev_stop, NULL);
         winebus_call(iohid_stop, NULL);
