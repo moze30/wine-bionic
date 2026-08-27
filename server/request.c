@@ -47,6 +47,9 @@
 #ifdef __APPLE__
 # include <mach/mach_time.h>
 #endif
+#ifdef __WINFUSION__
+# include <winfusion_utils.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -668,7 +671,12 @@ static char *create_server_dir( int force )
 
     /* create the base directory if needed */
 
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+#ifdef __WINFUSION__
+    char *tmp_dir = get_winfusion_tmp_dir();
+    if (asprintf( &base_dir, "%s/.wine-%u", tmp_dir, getuid() ) == -1)
+        fatal_error( "out of memory\n" );
+    free( tmp_dir );
+#elif defined(__ANDROID__)  /* there's no /tmp dir on Android */
     if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
         fatal_error( "out of memory\n" );
 #else
