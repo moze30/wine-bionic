@@ -1503,7 +1503,7 @@ WINE_PACKAGE_FLAGS(DRM,[libdrm],,,,
         [WINE_CHECK_SONAME(drm,drmOpen,,,[$DRM_LIBS])])])
 
 WINE_PACKAGE_FLAGS(DRMAMDGPU,[libdrm_amdgpu],,,,
-    [AC_CHECK_HEADERS([amdgpu_drm.h],
+    [AC_CHECK_HEADERS([amdgpu_drm.h amdgpu.h],
         [WINE_CHECK_SONAME(drm_amdgpu,amdgpu_query_info,,,[$DRMAMDGPU_LIBS])])])
 
 dnl **** Check for libgmp ****
@@ -2489,7 +2489,7 @@ WINE_CONFIG_MAKEFILE(dlls/advapi32/tests)
 WINE_CONFIG_MAKEFILE(dlls/advpack)
 WINE_CONFIG_MAKEFILE(dlls/advpack/tests)
 WINE_CONFIG_MAKEFILE(dlls/amsi)
-WINE_CONFIG_MAKEFILE(dlls/amd_ags_x64)
+WINE_CONFIG_MAKEFILE(dlls/amd_ags_x64,[enable_amd_ags_x64],[test "x$ac_cv_lib_soname_drm_amdgpu" = "x"])
 WINE_CONFIG_MAKEFILE(dlls/amstream)
 WINE_CONFIG_MAKEFILE(dlls/amstream/tests)
 WINE_CONFIG_MAKEFILE(dlls/apisetschema)
