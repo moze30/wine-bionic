@@ -188,9 +188,9 @@ static void *address_space_start = (void *)0x110000; /* keep DOS area clear */
 static void *address_space_start = (void *)0x10000;
 #endif
 #ifdef _WIN64
-static void *address_space_limit = (void *)0x7fffffff0000;  /* top of the total available address space */
-static void *user_space_limit    = (void *)0x7fffffff0000;  /* top of the user address space */
-static void *working_set_limit   = (void *)0x7fffffff0000;  /* top of the current working set */
+static void *address_space_limit = (void *)0x7fffff0000;  /* top of the total available address space */
+static void *user_space_limit    = (void *)0x7fffff0000;  /* top of the user address space */
+static void *working_set_limit   = (void *)0x7fffff0000;  /* top of the current working set */
 #else
 static void *address_space_limit = (void *)0xc0000000;
 static void *user_space_limit    = (void *)0x7fff0000;
