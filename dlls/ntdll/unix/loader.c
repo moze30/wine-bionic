@@ -74,7 +74,7 @@
 #  define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 # endif
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && !defined(__WINFUSION__)
 # include <jni.h>
 #endif
 extern char **environ;
@@ -2191,7 +2191,7 @@ static void start_main_thread(void)
     server_init_process_done();
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && !defined(__WINFUSION__)
 
 #ifndef WINE_JAVA_CLASS
 #define WINE_JAVA_CLASS "org/winehq/wine/WineActivity"
@@ -2312,7 +2312,7 @@ jint JNI_OnLoad( JavaVM *vm, void *reserved )
     return JNI_VERSION_1_6;
 }
 
-#endif  /* __ANDROID__ */
+#endif  /* defined(__ANDROID__) && !defined(__WINFUSION__) */
 
 #ifdef __APPLE__
 static void *apple_wine_thread( void *arg )

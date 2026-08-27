@@ -70,6 +70,9 @@
 #define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 #endif
 #endif
+#ifdef __WINFUSION__
+# include <winfusion_utils.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -1272,7 +1275,11 @@ static const char *init_server_dir( dev_t dev, ino_t ino )
     else
         snprintf( tmp + p, sizeof(tmp) - p, "%lx", (unsigned long)ino );
 
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+#ifdef __WINFUSION__
+    char *tmp_dir = get_winfusion_tmp_dir();
+    asprintf( &dir, "%s/.wine-%u/server-%s", tmp_dir, getuid(), tmp );
+    free( tmp_dir );
+#elif defined(__ANDROID__)  /* there's no /tmp dir on Android */
     asprintf( &dir, "%s/.wineserver/server-%s", config_dir, tmp );
 #else
     asprintf( &dir, "/tmp/.wine-%u/server-%s", getuid(), tmp );
@@ -1318,7 +1325,13 @@ static int setup_config_dir(void)
     {
         mkdir( "drive_c", 0777 );
         symlink( "../drive_c", "dosdevices/c:" );
+#ifdef __WINFUSION__
+        char *rootfs_dir = get_winfusion_rootfs_dir();
+        symlink( rootfs_dir, "dosdevices/z:" );
+        free( rootfs_dir );
+#else
         symlink( "/", "dosdevices/z:" );
+#endif
     }
     else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
 
