@@ -649,6 +649,14 @@ RT_LIBS
 WINELOADER_PROGRAMS
 DELAYLOADFLAG
 MSVCRTFLAGS
+WINFUSION_TASKMGR_LIBS
+WINFUSION_TASKMGR_CFLAGS
+WINFUSION_CONTROLLER_LIBS
+WINFUSION_CONTROLLER_CFLAGS
+WINFUSION_MIDI_LIBS
+WINFUSION_MIDI_CFLAGS
+WINFUSION_UTILS_LIBS
+WINFUSION_UTILS_CFLAGS
 NETAPI_LIBS
 NETAPI_CFLAGS
 PROCSTAT_LIBS
@@ -922,6 +930,7 @@ enable_maintainer_mode
 enable_sast
 enable_silent_rules
 enable_werror
+enable_winfusion
 with_alsa
 with_capi
 with_coreaudio
@@ -1544,6 +1553,8 @@ enable_winepulse_drv
 enable_wineusb_sys
 enable_winevulkan
 enable_winewayland_drv
+enable_winewinfusion_drv
+enable_winfusiontm
 enable_winex11_drv
 enable_winexinput_sys
 enable_wing32
@@ -1765,6 +1776,7 @@ enable_winemenubuilder
 enable_winemine
 enable_winemsibuilder
 enable_winepath
+enable_wftm
 enable_winetest
 enable_winevdm
 enable_winhlp32
@@ -1893,7 +1905,15 @@ KRB5_LIBS
 GSSAPI_CFLAGS
 GSSAPI_LIBS
 NETAPI_CFLAGS
-NETAPI_LIBS'
+NETAPI_LIBS
+WINFUSION_UTILS_CFLAGS
+WINFUSION_UTILS_LIBS
+WINFUSION_MIDI_CFLAGS
+WINFUSION_MIDI_LIBS
+WINFUSION_CONTROLLER_CFLAGS
+WINFUSION_CONTROLLER_LIBS
+WINFUSION_TASKMGR_CFLAGS
+WINFUSION_TASKMGR_LIBS'
 
 
 # Initialize some variables set by options.
@@ -2533,6 +2553,7 @@ Optional Features:
                           Clang
   --enable-silent-rules   use silent build rules (override: "make V=1")
   --enable-werror         treat compilation warnings as errors
+  --enable-winfusion      build for winfusion app
   --disable-largefile     omit support for large files
   --disable-year2038      don't support timestamps after 2038
 
@@ -2767,6 +2788,26 @@ Some influential environment variables:
   NETAPI_CFLAGS
               C compiler flags for netapi, overriding pkg-config
   NETAPI_LIBS Linker flags for netapi, overriding pkg-config
+  WINFUSION_UTILS_CFLAGS
+              C compiler flags for winfusion_utils, overriding pkg-config
+  WINFUSION_UTILS_LIBS
+              Linker flags for winfusion_utils, overriding pkg-config
+  WINFUSION_MIDI_CFLAGS
+              C compiler flags for winfusion_midi_ipc, overriding pkg-config
+  WINFUSION_MIDI_LIBS
+              Linker flags for winfusion_midi_ipc, overriding pkg-config
+  WINFUSION_CONTROLLER_CFLAGS
+              C compiler flags for winfusion_game_controller_ipc, overriding
+              pkg-config
+  WINFUSION_CONTROLLER_LIBS
+              Linker flags for winfusion_game_controller_ipc, overriding
+              pkg-config
+  WINFUSION_TASKMGR_CFLAGS
+              C compiler flags for winfusion_task_manager_ipc, overriding
+              pkg-config
+  WINFUSION_TASKMGR_LIBS
+              Linker flags for winfusion_task_manager_ipc, overriding
+              pkg-config
 
 Use these variables to override the choices made by 'configure' or to help
 it to find libraries and programs with nonstandard names/locations.
@@ -4350,6 +4391,12 @@ fi
 if test ${enable_werror+y}
 then :
   enableval=$enable_werror;
+fi
+
+# Check whether --enable-winfusion was given.
+if test ${enable_winfusion+y}
+then :
+  enableval=$enable_winfusion;
 fi
 
 
@@ -10175,6 +10222,12 @@ then :
   printf "%s\n" "#define HAVE_SYS_EVENT_H 1" >>confdefs.h
 
 fi
+ac_fn_c_check_header_compile "$LINENO" "sys/eventfd.h" "ac_cv_header_sys_eventfd_h" "$ac_includes_default"
+if test "x$ac_cv_header_sys_eventfd_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_SYS_EVENTFD_H 1" >>confdefs.h
+
+fi
 ac_fn_c_check_header_compile "$LINENO" "sys/extattr.h" "ac_cv_header_sys_extattr_h" "$ac_includes_default"
 if test "x$ac_cv_header_sys_extattr_h" = xyes
 then :
@@ -11902,7 +11955,6 @@ printf "%s\n" "#define _GNU_SOURCE 1" >>confdefs.h
     DLLFLAGS="$DLLFLAGS -fPIC"
     LDDLLFLAGS="-fPIC"
     LDEXECFLAGS="-Wl,-pie"
-    enable_wineandroid_drv=${enable_wineandroid_drv:-yes}
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-z,defs" >&5
 printf %s "checking whether the compiler supports -Wl,-z,defs... " >&6; }
 if test ${ac_cv_cflags__Wl__z_defs+y}
@@ -11965,7 +12017,14 @@ then :
 fi
     WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7d400000"
 
-    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for -lGLESv2" >&5
+    if test "x$enable_winfusion" = "xyes"
+    then
+
+printf "%s\n" "#define __WINFUSION__ 1" >>confdefs.h
+
+    else
+      enable_wineandroid_drv=${enable_wineandroid_drv:-yes}
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for -lGLESv2" >&5
 printf %s "checking for -lGLESv2... " >&6; }
 if test ${ac_cv_lib_soname_GLESv2+y}
 then :
@@ -12029,14 +12088,15 @@ printf "%s\n" "#define SONAME_LIBGLESV2 \"$ac_cv_lib_soname_GLESv2\"" >>confdefs
 esac
 fi
 
-    if test "x$exec_prefix" = xNONE
-    then
-      case $HOST_ARCH in
-        i386)    exec_prefix='${prefix}/x86' ;;
-        x86_64)  exec_prefix='${prefix}/x86_64' ;;
-        arm)     exec_prefix='${prefix}/armeabi-v7a' ;;
-        aarch64) exec_prefix='${prefix}/arm64-v8a' ;;
-      esac
+      if test "x$exec_prefix" = xNONE
+      then
+        case $HOST_ARCH in
+          i386)    exec_prefix='${prefix}/x86' ;;
+          x86_64)  exec_prefix='${prefix}/x86_64' ;;
+          arm)     exec_prefix='${prefix}/armeabi-v7a' ;;
+          aarch64) exec_prefix='${prefix}/arm64-v8a' ;;
+        esac
+      fi
     fi
     ;;
 
@@ -19834,6 +19894,396 @@ esac
 
 fi
 
+if test "x$enable_winfusion" = "xyes"
+then
+    rm -f conftest.err
+if ${WINFUSION_UTILS_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_UTILS_CFLAGS=`$PKG_CONFIG --cflags winfusion_utils 2>conftest.err`
+fi
+fi
+
+if ${WINFUSION_UTILS_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_UTILS_LIBS=`$PKG_CONFIG --libs winfusion_utils 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_utils cflags: $WINFUSION_UTILS_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_utils libs: $WINFUSION_UTILS_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: winfusion_utils errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $WINFUSION_UTILS_CFLAGS"
+ac_fn_c_check_header_compile "$LINENO" "winfusion_utils.h" "ac_cv_header_winfusion_utils_h" "$ac_includes_default"
+if test "x$ac_cv_header_winfusion_utils_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_WINFUSION_UTILS_H 1" >>confdefs.h
+
+fi
+
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for get_winfusion_home in -lwinfusion_utils" >&5
+printf %s "checking for get_winfusion_home in -lwinfusion_utils... " >&6; }
+if test ${ac_cv_lib_winfusion_utils_get_winfusion_home+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lwinfusion_utils $WINFUSION_UTILS_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char get_winfusion_home (void);
+int
+main (void)
+{
+return get_winfusion_home ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_winfusion_utils_get_winfusion_home=yes
+else case e in #(
+  e) ac_cv_lib_winfusion_utils_get_winfusion_home=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_winfusion_utils_get_winfusion_home" >&5
+printf "%s\n" "$ac_cv_lib_winfusion_utils_get_winfusion_home" >&6; }
+if test "x$ac_cv_lib_winfusion_utils_get_winfusion_home" = xyes
+then :
+  :
+else case e in #(
+  e) WINFUSION_UTILS_LIBS="" ;;
+esac
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
+    if test -z "$WINFUSION_UTILS_LIBS"
+    then
+        as_fn_error $? "WinFusion Utils not found, cannot built with --enable-winfusion" "$LINENO" 5
+    fi
+    rm -f conftest.err
+if ${WINFUSION_MIDI_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_MIDI_CFLAGS=`$PKG_CONFIG --cflags winfusion_midi_ipc 2>conftest.err`
+fi
+fi
+
+if ${WINFUSION_MIDI_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_MIDI_LIBS=`$PKG_CONFIG --libs winfusion_midi_ipc 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_midi_ipc cflags: $WINFUSION_MIDI_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_midi_ipc libs: $WINFUSION_MIDI_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: winfusion_midi_ipc errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $WINFUSION_MIDI_CFLAGS"
+       for ac_header in shm/drivers/midi_driver.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "shm/drivers/midi_driver.h" "ac_cv_header_shm_drivers_midi_driver_h" "$ac_includes_default"
+if test "x$ac_cv_header_shm_drivers_midi_driver_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_SHM_DRIVERS_MIDI_DRIVER_H 1" >>confdefs.h
+
+else case e in #(
+  e) WINFUSION_MIDI_LIBS="" ;;
+esac
+fi
+
+done
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for midi_ipc_client_connect_from_env in -lwinfusion_midi_ipc" >&5
+printf %s "checking for midi_ipc_client_connect_from_env in -lwinfusion_midi_ipc... " >&6; }
+if test ${ac_cv_lib_winfusion_midi_ipc_midi_ipc_client_connect_from_env+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lwinfusion_midi_ipc $WINFUSION_MIDI_LIBS $PTHREAD_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char midi_ipc_client_connect_from_env (void);
+int
+main (void)
+{
+return midi_ipc_client_connect_from_env ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_winfusion_midi_ipc_midi_ipc_client_connect_from_env=yes
+else case e in #(
+  e) ac_cv_lib_winfusion_midi_ipc_midi_ipc_client_connect_from_env=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_winfusion_midi_ipc_midi_ipc_client_connect_from_env" >&5
+printf "%s\n" "$ac_cv_lib_winfusion_midi_ipc_midi_ipc_client_connect_from_env" >&6; }
+if test "x$ac_cv_lib_winfusion_midi_ipc_midi_ipc_client_connect_from_env" = xyes
+then :
+  :
+else case e in #(
+  e) WINFUSION_MIDI_LIBS="" ;;
+esac
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
+    if test -z "$WINFUSION_MIDI_LIBS"
+    then
+        as_fn_error $? "WinFusion MIDI IPC client not found, cannot build with --enable-winfusion" "$LINENO" 5
+    fi
+    rm -f conftest.err
+if ${WINFUSION_CONTROLLER_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_CONTROLLER_CFLAGS=`$PKG_CONFIG --cflags winfusion_game_controller_ipc 2>conftest.err`
+fi
+fi
+
+if ${WINFUSION_CONTROLLER_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_CONTROLLER_LIBS=`$PKG_CONFIG --libs winfusion_game_controller_ipc 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_game_controller_ipc cflags: $WINFUSION_CONTROLLER_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_game_controller_ipc libs: $WINFUSION_CONTROLLER_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: winfusion_game_controller_ipc errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $WINFUSION_CONTROLLER_CFLAGS"
+       for ac_header in shm/drivers/game_controller_driver.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "shm/drivers/game_controller_driver.h" "ac_cv_header_shm_drivers_game_controller_driver_h" "$ac_includes_default"
+if test "x$ac_cv_header_shm_drivers_game_controller_driver_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_SHM_DRIVERS_GAME_CONTROLLER_DRIVER_H 1" >>confdefs.h
+
+else case e in #(
+  e) WINFUSION_CONTROLLER_LIBS="" ;;
+esac
+fi
+
+done
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for game_controller_ipc_client_connect_from_env in -lwinfusion_game_controller_ipc" >&5
+printf %s "checking for game_controller_ipc_client_connect_from_env in -lwinfusion_game_controller_ipc... " >&6; }
+if test ${ac_cv_lib_winfusion_game_controller_ipc_game_controller_ipc_client_connect_from_env+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lwinfusion_game_controller_ipc $WINFUSION_CONTROLLER_LIBS $PTHREAD_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char game_controller_ipc_client_connect_from_env (void);
+int
+main (void)
+{
+return game_controller_ipc_client_connect_from_env ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_winfusion_game_controller_ipc_game_controller_ipc_client_connect_from_env=yes
+else case e in #(
+  e) ac_cv_lib_winfusion_game_controller_ipc_game_controller_ipc_client_connect_from_env=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_winfusion_game_controller_ipc_game_controller_ipc_client_connect_from_env" >&5
+printf "%s\n" "$ac_cv_lib_winfusion_game_controller_ipc_game_controller_ipc_client_connect_from_env" >&6; }
+if test "x$ac_cv_lib_winfusion_game_controller_ipc_game_controller_ipc_client_connect_from_env" = xyes
+then :
+  :
+else case e in #(
+  e) WINFUSION_CONTROLLER_LIBS="" ;;
+esac
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
+    if test -z "$WINFUSION_CONTROLLER_LIBS"
+    then
+        as_fn_error $? "WinFusion GameController IPC client not found, cannot build with --enable-winfusion" "$LINENO" 5
+    fi
+    rm -f conftest.err
+if ${WINFUSION_TASKMGR_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_TASKMGR_CFLAGS=`$PKG_CONFIG --cflags winfusion_task_manager_ipc 2>conftest.err`
+fi
+fi
+
+if ${WINFUSION_TASKMGR_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WINFUSION_TASKMGR_LIBS=`$PKG_CONFIG --libs winfusion_task_manager_ipc 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_task_manager_ipc cflags: $WINFUSION_TASKMGR_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: winfusion_task_manager_ipc libs: $WINFUSION_TASKMGR_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: winfusion_task_manager_ipc errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $WINFUSION_TASKMGR_CFLAGS"
+       for ac_header in shm/drivers/task_manager_driver.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "shm/drivers/task_manager_driver.h" "ac_cv_header_shm_drivers_task_manager_driver_h" "$ac_includes_default"
+if test "x$ac_cv_header_shm_drivers_task_manager_driver_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_SHM_DRIVERS_TASK_MANAGER_DRIVER_H 1" >>confdefs.h
+
+else case e in #(
+  e) WINFUSION_TASKMGR_LIBS="" ;;
+esac
+fi
+
+done
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for task_manager_ipc_client_connect_from_env in -lwinfusion_task_manager_ipc" >&5
+printf %s "checking for task_manager_ipc_client_connect_from_env in -lwinfusion_task_manager_ipc... " >&6; }
+if test ${ac_cv_lib_winfusion_task_manager_ipc_task_manager_ipc_client_connect_from_env+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lwinfusion_task_manager_ipc $WINFUSION_TASKMGR_LIBS $PTHREAD_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char task_manager_ipc_client_connect_from_env (void);
+int
+main (void)
+{
+return task_manager_ipc_client_connect_from_env ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_winfusion_task_manager_ipc_task_manager_ipc_client_connect_from_env=yes
+else case e in #(
+  e) ac_cv_lib_winfusion_task_manager_ipc_task_manager_ipc_client_connect_from_env=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_winfusion_task_manager_ipc_task_manager_ipc_client_connect_from_env" >&5
+printf "%s\n" "$ac_cv_lib_winfusion_task_manager_ipc_task_manager_ipc_client_connect_from_env" >&6; }
+if test "x$ac_cv_lib_winfusion_task_manager_ipc_task_manager_ipc_client_connect_from_env" = xyes
+then :
+  :
+else case e in #(
+  e) WINFUSION_TASKMGR_LIBS="" ;;
+esac
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
+    if test -z "$WINFUSION_TASKMGR_LIBS"
+    then
+        as_fn_error $? "WinFusion TaskManager IPC client not found, cannot build with --enable-winfusion" "$LINENO" 5
+    fi
+else
+    enable_winewinfusion_drv=no
+    enable_winfusiontm=no
+    enable_wftm=no
+fi
+
 
 if test "x${GCC}" = "xyes"
 then
@@ -21192,6 +21642,12 @@ then :
   printf "%s\n" "#define HAVE_POSIX_FALLOCATE 1" >>confdefs.h
 
 fi
+ac_fn_c_check_func "$LINENO" "ppoll" "ac_cv_func_ppoll"
+if test "x$ac_cv_func_ppoll" = xyes
+then :
+  printf "%s\n" "#define HAVE_PPOLL 1" >>confdefs.h
+
+fi
 ac_fn_c_check_func "$LINENO" "prctl" "ac_cv_func_prctl"
 if test "x$ac_cv_func_prctl" = xyes
 then :
@@ -21316,6 +21772,80 @@ then :
   test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
 
 printf "%s\n" "#define HAVE_CLOCK_GETTIME 1" >>confdefs.h
+
+                test "$ac_res" = "none required" || RT_LIBS="$ac_res"
+
+fi
+
+LIBS=$ac_save_LIBS
+
+ac_save_LIBS=$LIBS
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for library containing shm_open" >&5
+printf %s "checking for library containing shm_open... " >&6; }
+if test ${ac_cv_search_shm_open+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_func_search_save_LIBS=$LIBS
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char shm_open (void);
+int
+main (void)
+{
+return shm_open ();
+  ;
+  return 0;
+}
+_ACEOF
+for ac_lib in '' rt
+do
+  if test -z "$ac_lib"; then
+    ac_res="none required"
+  else
+    ac_res=-l$ac_lib
+    LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
+  fi
+  if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_search_shm_open=$ac_res
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext
+  if test ${ac_cv_search_shm_open+y}
+then :
+  break
+fi
+done
+if test ${ac_cv_search_shm_open+y}
+then :
+
+else case e in #(
+  e) ac_cv_search_shm_open=no ;;
+esac
+fi
+rm conftest.$ac_ext
+LIBS=$ac_func_search_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_shm_open" >&5
+printf "%s\n" "$ac_cv_search_shm_open" >&6; }
+ac_res=$ac_cv_search_shm_open
+if test "$ac_res" != no
+then :
+  test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
+
+printf "%s\n" "#define HAVE_SHM_OPEN 1" >>confdefs.h
 
                 test "$ac_res" = "none required" || RT_LIBS="$ac_res"
 
@@ -23068,6 +23598,8 @@ wine_fn_config_makefile dlls/winepulse.drv enable_winepulse_drv
 wine_fn_config_makefile dlls/wineusb.sys enable_wineusb_sys
 wine_fn_config_makefile dlls/winevulkan enable_winevulkan
 wine_fn_config_makefile dlls/winewayland.drv enable_winewayland_drv
+wine_fn_config_makefile dlls/winewinfusion.drv enable_winewinfusion_drv
+wine_fn_config_makefile dlls/winfusiontm enable_winfusiontm
 wine_fn_config_makefile dlls/winex11.drv enable_winex11_drv
 wine_fn_config_makefile dlls/winexinput.sys enable_winexinput_sys
 wine_fn_config_makefile dlls/wing.dll16 enable_win16
@@ -23336,6 +23868,7 @@ wine_fn_config_makefile programs/winemenubuilder enable_winemenubuilder
 wine_fn_config_makefile programs/winemine enable_winemine
 wine_fn_config_makefile programs/winemsibuilder enable_winemsibuilder
 wine_fn_config_makefile programs/winepath enable_winepath
+wine_fn_config_makefile programs/wftm enable_wftm
 wine_fn_config_makefile programs/winetest enable_winetest
 wine_fn_config_makefile programs/winevdm enable_winevdm
 wine_fn_config_makefile programs/winhelp.exe16 enable_win16
@@ -24407,6 +24940,14 @@ GSSAPI_LIBS = $GSSAPI_LIBS
 PROCSTAT_LIBS = $PROCSTAT_LIBS
 NETAPI_CFLAGS = $NETAPI_CFLAGS
 NETAPI_LIBS = $NETAPI_LIBS
+WINFUSION_UTILS_CFLAGS = $WINFUSION_UTILS_CFLAGS
+WINFUSION_UTILS_LIBS = $WINFUSION_UTILS_LIBS
+WINFUSION_MIDI_CFLAGS = $WINFUSION_MIDI_CFLAGS
+WINFUSION_MIDI_LIBS = $WINFUSION_MIDI_LIBS
+WINFUSION_CONTROLLER_CFLAGS = $WINFUSION_CONTROLLER_CFLAGS
+WINFUSION_CONTROLLER_LIBS = $WINFUSION_CONTROLLER_LIBS
+WINFUSION_TASKMGR_CFLAGS = $WINFUSION_TASKMGR_CFLAGS
+WINFUSION_TASKMGR_LIBS = $WINFUSION_TASKMGR_LIBS
 MSVCRTFLAGS = $MSVCRTFLAGS
 DELAYLOADFLAG = $DELAYLOADFLAG
 WINELOADER_PROGRAMS = $WINELOADER_PROGRAMS
