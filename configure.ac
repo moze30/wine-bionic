@@ -1647,6 +1647,7 @@ WINE_ERROR_WITH(freetype,[test "x$ac_cv_lib_soname_freetype" = x],
 dnl **** Check for pthread functions ****
 WINE_CHECK_LIB_FUNCS(\
         pthread_getthreadid_np,
+        pthread_mutexattr_setrobust,
         [$PTHREAD_LIBS])
 
 dnl **** Check for gettextpo ****
