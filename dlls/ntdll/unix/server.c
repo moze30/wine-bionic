@@ -71,6 +71,10 @@
 #endif
 #endif
 
+#ifdef __WINFUSION__
+# include <winfusion_utils.h>
+#endif
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -79,6 +83,7 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "unix_private.h"
+#include "esync.h"
 #include "ddk/wdm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
@@ -961,7 +966,7 @@ void wine_server_send_fd( int fd )
  *
  * Receive a file descriptor passed from the server.
  */
-int wine_server_receive_fd( obj_handle_t *handle )
+int receive_fd( obj_handle_t *handle )
 {
     struct iovec vec;
     struct msghdr msghdr;
@@ -1156,7 +1161,7 @@ int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
                 if (type) *type = reply->type;
                 if (options) *options = reply->options;
                 access = reply->access;
-                if ((fd = wine_server_receive_fd( &fd_handle )) != -1)
+                if ((fd = receive_fd( &fd_handle )) != -1)
                 {
                     assert( wine_server_ptr_handle(fd_handle) == handle );
                     *needs_close = (!reply->cacheable ||
@@ -1281,7 +1286,11 @@ static const char *init_server_dir( dev_t dev, ino_t ino )
 {
     char *dir = NULL;
 
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+#ifdef __WINFUSION__
+    char *tmp_dir = get_winfusion_tmp_dir();
+    asprintf( &dir, "%s/.wine-%u/server-%llx-%llx", tmp_dir, getuid(), (unsigned long long)dev, (unsigned long long)ino );
+    free( tmp_dir );
+#elif defined(__ANDROID__)  /* there's no /tmp dir on Android */
     asprintf( &dir, "%s/.wineserver/server-%llx-%llx", config_dir, (unsigned long long)dev, (unsigned long long)ino );
 #else
     asprintf( &dir, "/tmp/.wine-%u/server-%llx-%llx", getuid(), (unsigned long long)dev, (unsigned long long)ino );
@@ -1327,7 +1336,13 @@ static int setup_config_dir(void)
     {
         mkdir( "drive_c", 0777 );
         symlink( "../drive_c", "dosdevices/c:" );
+#ifdef __WINFUSION__
+        char *rootfs_dir = get_winfusion_rootfs_dir();
+        symlink( rootfs_dir, "dosdevices/z:" );
+        free( rootfs_dir );
+#else
         symlink( "/", "dosdevices/z:" );
+#endif
     }
     else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
 
@@ -1570,7 +1585,6 @@ size_t server_init_process(void)
 {
     const char *arch = getenv( "WINEARCH" );
     const char *env_socket = getenv( "WINESERVERSOCKET" );
-    struct ntdll_thread_data *data = ntdll_get_thread_data();
     obj_handle_t version;
     unsigned int i;
     int ret, reply_pipe;
@@ -1610,7 +1624,7 @@ size_t server_init_process(void)
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
 
     /* receive the first thread request fd on the main socket */
-    data->request_fd = wine_server_receive_fd( &version );
+    ntdll_get_thread_data()->request_fd = receive_fd( &version );
 
 #ifdef SO_PASSCRED
     /* now that we hopefully received the server_pid, disable SO_PASSCRED */
@@ -1645,24 +1659,16 @@ size_t server_init_process(void)
         req->unix_pid    = getpid();
         req->unix_tid    = get_unix_tid();
         req->reply_fd    = reply_pipe;
-        req->wait_fd     = data->wait_fd[1];
+        req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
         wine_server_set_reply( req, supported_machines, sizeof(supported_machines) );
-        if (!(ret = wine_server_call( req )))
-        {
-            obj_handle_t handle;
-            pid               = reply->pid;
-            tid               = reply->tid;
-            peb->SessionId    = reply->session_id;
-            info_size         = reply->info_size;
-            server_start_time = reply->server_start;
-            supported_machines_count = wine_server_reply_size( reply ) / sizeof(*supported_machines);
-            if (reply->inproc_device)
-            {
-                inproc_device_fd = wine_server_receive_fd( &handle );
-                assert( handle == reply->inproc_device );
-            }
-        }
+        ret = wine_server_call( req );
+        pid               = reply->pid;
+        tid               = reply->tid;
+        peb->SessionId    = reply->session_id;
+        info_size         = reply->info_size;
+        server_start_time = reply->server_start;
+        supported_machines_count = wine_server_reply_size( reply ) / sizeof(*supported_machines);
     }
     SERVER_END_REQ;
     close( reply_pipe );
@@ -1910,6 +1916,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     /* always remove the cached fd; if the server request fails we'll just
      * retrieve it again */
     fd = remove_fd_from_cache( handle );
+
+    if (do_esync())
+        esync_close( handle );
 
     SERVER_START_REQ( close_handle )
     {

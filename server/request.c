@@ -47,6 +47,9 @@
 #ifdef __APPLE__
 # include <mach/mach_time.h>
 #endif
+#ifdef __WINFUSION__
+# include <winfusion_utils.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -89,10 +92,10 @@ static const struct object_ops master_socket_ops =
     no_add_queue,                  /* add_queue */
     NULL,                          /* remove_queue */
     NULL,                          /* signaled */
+    NULL,                          /* get_esync_fd */
     NULL,                          /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
-    default_get_sync,              /* get_sync */
     default_map_access,            /* map_access */
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
@@ -640,7 +643,12 @@ static char *create_server_dir( int force )
 
     /* create the base directory if needed */
 
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+#ifdef __WINFUSION__
+    char *tmp_dir = get_winfusion_tmp_dir();
+    if (asprintf( &base_dir, "%s/.wine-%u", tmp_dir, getuid() ) == -1)
+        fatal_error( "out of memory\n" );
+    free( tmp_dir );
+#elif defined(__ANDROID__)  /* there's no /tmp dir on Android */
     if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
         fatal_error( "out of memory\n" );
 #else

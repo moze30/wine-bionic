@@ -57,9 +57,6 @@
 #ifdef HAVE_KQUEUE
 # include <sys/event.h>
 #endif
-#ifdef HAVE_LINUX_NTSYNC_H
-# include <linux/ntsync.h>
-#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -69,19 +66,17 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "unix_private.h"
+#include "esync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
 HANDLE keyed_event = 0;
-int inproc_device_fd = -1;
 
 static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
 {
     if (!timeout) return "(infinite)";
-    return wine_dbg_sprintf( "%lld.%07ld", (long long)(timeout->QuadPart / TICKSPERSEC),
-                             (long)(timeout->QuadPart % TICKSPERSEC) );
+    return wine_dbgstr_longlong( timeout->QuadPart );
 }
-
 
 /* return a monotonic time counter, in Win32 ticks */
 static inline ULONGLONG monotonic_counter(void)
@@ -307,133 +302,6 @@ static unsigned int validate_open_object_attributes( const OBJECT_ATTRIBUTES *at
 }
 
 
-struct inproc_sync
-{
-    int fd;
-    unsigned int access;
-    unsigned int type : 2;
-};
-
-static void release_inproc_sync( struct inproc_sync *sync )
-{
-    close( sync->fd );
-}
-
-static NTSTATUS get_inproc_sync( HANDLE handle, ACCESS_MASK desired_access, struct inproc_sync *sync )
-{
-    sigset_t sigset;
-    NTSTATUS ret;
-
-    /* We need to use fd_cache_mutex here to protect against races with
-     * other threads trying to receive fds for the fd cache,
-     * and we need to use an uninterrupted section to prevent reentrancy. */
-    server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
-
-    SERVER_START_REQ( get_inproc_sync_fd )
-    {
-        req->handle = wine_server_obj_handle( handle );
-        if (!(ret = wine_server_call( req )))
-        {
-            obj_handle_t fd_handle;
-            sync->fd = wine_server_receive_fd( &fd_handle );
-            assert( wine_server_ptr_handle(fd_handle) == handle );
-            sync->access = reply->access;
-            sync->type = reply->type;
-        }
-    }
-    SERVER_END_REQ;
-
-    server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
-
-    if (ret) return ret;
-    if ((sync->access & desired_access) != desired_access)
-    {
-        release_inproc_sync( sync );
-        return STATUS_ACCESS_DENIED;
-    }
-
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS inproc_release_semaphore( HANDLE handle, ULONG count, ULONG *prev_count )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_query_semaphore( HANDLE handle, SEMAPHORE_BASIC_INFORMATION *info )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_set_event( HANDLE handle, LONG *prev_state )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_reset_event( HANDLE handle, LONG *prev_state )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_pulse_event( HANDLE handle, LONG *prev_state )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_query_event( HANDLE handle, EVENT_BASIC_INFORMATION *info )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_release_mutex( HANDLE handle, LONG *prev_count )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_query_mutex( HANDLE handle, MUTANT_BASIC_INFORMATION *info )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_wait( DWORD count, const HANDLE *handles, BOOLEAN wait_any,
-                             BOOLEAN alertable, const LARGE_INTEGER *timeout )
-{
-    struct inproc_sync *syncs[64], stack[ARRAY_SIZE(syncs)];
-    NTSTATUS ret;
-
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-
-    assert( count <= ARRAY_SIZE(syncs) );
-    for (int i = 0; i < count; ++i)
-    {
-        if ((ret = get_inproc_sync( handles[i], SYNCHRONIZE, stack + i )))
-        {
-            while (i--) release_inproc_sync( syncs[i] );
-            return ret;
-        }
-        syncs[i] = stack + i;
-    }
-
-    while (count--) release_inproc_sync( syncs[count] );
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS inproc_signal_and_wait( HANDLE signal, HANDLE wait,
-                                        BOOLEAN alertable, const LARGE_INTEGER *timeout )
-{
-    if (inproc_device_fd < 0) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-
 /******************************************************************************
  *              NtCreateSemaphore (NTDLL.@)
  */
@@ -444,12 +312,12 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
     data_size_t len;
     struct object_attributes *objattr;
 
-    TRACE( "access %#x, name %s, initial %d, max %d\n", access,
-           attr ? debugstr_us(attr->ObjectName) : "(null)", initial, max );
-
     *handle = 0;
     if (max <= 0 || initial < 0 || initial > max) return STATUS_INVALID_PARAMETER;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+
+    if (do_esync())
+        return esync_create_semaphore( handle, access, attr, initial, max );
 
     SERVER_START_REQ( create_semaphore )
     {
@@ -474,9 +342,11 @@ NTSTATUS WINAPI NtOpenSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJEC
 {
     unsigned int ret;
 
-    TRACE( "access %#x, name %s\n", access, attr ? debugstr_us(attr->ObjectName) : "(null)" );
-
     *handle = 0;
+
+    if (do_esync())
+        return esync_open_semaphore( handle, access, attr );
+
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_semaphore )
@@ -513,11 +383,8 @@ NTSTATUS WINAPI NtQuerySemaphore( HANDLE handle, SEMAPHORE_INFORMATION_CLASS cla
 
     if (len != sizeof(SEMAPHORE_BASIC_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
 
-    if ((ret = inproc_query_semaphore( handle, out )) != STATUS_NOT_IMPLEMENTED)
-    {
-        if (!ret && ret_len) *ret_len = sizeof(SEMAPHORE_BASIC_INFORMATION);
-        return ret;
-    }
+    if (do_esync())
+        return esync_query_semaphore( handle, info, ret_len );
 
     SERVER_START_REQ( query_semaphore )
     {
@@ -541,10 +408,8 @@ NTSTATUS WINAPI NtReleaseSemaphore( HANDLE handle, ULONG count, ULONG *previous 
 {
     unsigned int ret;
 
-    TRACE( "handle %p, count %u, prev_count %p\n", handle, count, previous );
-
-    if ((ret = inproc_release_semaphore( handle, count, previous )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
+    if (do_esync())
+        return esync_release_semaphore( handle, count, previous );
 
     SERVER_START_REQ( release_semaphore )
     {
@@ -570,11 +435,12 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     data_size_t len;
     struct object_attributes *objattr;
 
-    TRACE( "access %#x, name %s, type %u, state %u\n", access,
-           attr ? debugstr_us(attr->ObjectName) : "(null)", type, state );
-
     *handle = 0;
     if (type != NotificationEvent && type != SynchronizationEvent) return STATUS_INVALID_PARAMETER;
+
+    if (do_esync())
+        return esync_create_event( handle, access, attr, type, state );
+
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_event )
@@ -600,10 +466,11 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
 {
     unsigned int ret;
 
-    TRACE( "access %#x, name %s\n", access, attr ? debugstr_us(attr->ObjectName) : "(null)" );
-
     *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
+
+    if (do_esync())
+        return esync_open_event( handle, access, attr );
 
     SERVER_START_REQ( open_event )
     {
@@ -625,12 +492,11 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
  */
 NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
 {
+    /* This comment is a dummy to make sure this patch applies in the right place. */
     unsigned int ret;
 
-    TRACE( "handle %p, prev_state %p\n", handle, prev_state );
-
-    if ((ret = inproc_set_event( handle, prev_state )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
+    if (do_esync())
+        return esync_set_event( handle );
 
     SERVER_START_REQ( event_op )
     {
@@ -649,12 +515,12 @@ NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
  */
 NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
 {
+    /* This comment is a dummy to make sure this patch applies in the right place. */
     unsigned int ret;
 
-    TRACE( "handle %p, prev_state %p\n", handle, prev_state );
+    if (do_esync())
+        return esync_reset_event( handle );
 
-    if ((ret = inproc_reset_event( handle, prev_state )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
 
     SERVER_START_REQ( event_op )
     {
@@ -685,10 +551,8 @@ NTSTATUS WINAPI NtPulseEvent( HANDLE handle, LONG *prev_state )
 {
     unsigned int ret;
 
-    TRACE( "handle %p, prev_state %p\n", handle, prev_state );
-
-    if ((ret = inproc_pulse_event( handle, prev_state )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
+    if (do_esync())
+        return esync_pulse_event( handle );
 
     SERVER_START_REQ( event_op )
     {
@@ -721,11 +585,8 @@ NTSTATUS WINAPI NtQueryEvent( HANDLE handle, EVENT_INFORMATION_CLASS class,
 
     if (len != sizeof(EVENT_BASIC_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
 
-    if ((ret = inproc_query_event( handle, out )) != STATUS_NOT_IMPLEMENTED)
-    {
-        if (!ret && ret_len) *ret_len = sizeof(EVENT_BASIC_INFORMATION);
-        return ret;
-    }
+    if (do_esync())
+        return esync_query_event( handle, info, ret_len );
 
     SERVER_START_REQ( query_event )
     {
@@ -752,10 +613,11 @@ NTSTATUS WINAPI NtCreateMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT
     data_size_t len;
     struct object_attributes *objattr;
 
-    TRACE( "access %#x, name %s, owned %u\n", access,
-           attr ? debugstr_us(attr->ObjectName) : "(null)", owned );
-
     *handle = 0;
+
+    if (do_esync())
+        return esync_create_mutex( handle, access, attr, owned );
+
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_mutex )
@@ -780,10 +642,11 @@ NTSTATUS WINAPI NtOpenMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT_A
 {
     unsigned int ret;
 
-    TRACE( "access %#x, name %s\n", access, attr ? debugstr_us(attr->ObjectName) : "(null)" );
-
     *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
+
+    if (do_esync())
+        return esync_open_mutex( handle, access, attr );
 
     SERVER_START_REQ( open_mutex )
     {
@@ -807,10 +670,8 @@ NTSTATUS WINAPI NtReleaseMutant( HANDLE handle, LONG *prev_count )
 {
     unsigned int ret;
 
-    TRACE( "handle %p, prev_count %p\n", handle, prev_count );
-
-    if ((ret = inproc_release_mutex( handle, prev_count )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
+    if (do_esync())
+        return esync_release_mutex( handle, prev_count );
 
     SERVER_START_REQ( release_mutex )
     {
@@ -842,11 +703,8 @@ NTSTATUS WINAPI NtQueryMutant( HANDLE handle, MUTANT_INFORMATION_CLASS class,
 
     if (len != sizeof(MUTANT_BASIC_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
 
-    if ((ret = inproc_query_mutex( handle, out )) != STATUS_NOT_IMPLEMENTED)
-    {
-        if (!ret && ret_len) *ret_len = sizeof(MUTANT_BASIC_INFORMATION);
-        return ret;
-    }
+    if (do_esync())
+        return esync_query_mutex( handle, info, ret_len );
 
     SERVER_START_REQ( query_mutex )
     {
@@ -1617,9 +1475,6 @@ NTSTATUS WINAPI NtCreateTimer( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     data_size_t len;
     struct object_attributes *objattr;
 
-    TRACE( "access %#x, name %s, type %u\n", access,
-           attr ? debugstr_us(attr->ObjectName) : "(null)", type );
-
     *handle = 0;
     if (type != NotificationTimer && type != SynchronizationTimer) return STATUS_INVALID_PARAMETER;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
@@ -1646,8 +1501,6 @@ NTSTATUS WINAPI NtCreateTimer( HANDLE *handle, ACCESS_MASK access, const OBJECT_
 NTSTATUS WINAPI NtOpenTimer( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
 {
     unsigned int ret;
-
-    TRACE( "access %#x, name %s\n", access, attr ? debugstr_us(attr->ObjectName) : "(null)" );
 
     *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
@@ -1701,8 +1554,6 @@ NTSTATUS WINAPI NtSetTimer( HANDLE handle, const LARGE_INTEGER *when, PTIMER_APC
 NTSTATUS WINAPI NtCancelTimer( HANDLE handle, BOOLEAN *state )
 {
     unsigned int ret;
-
-    TRACE( "handle %p, state %p\n", handle, state );
 
     SERVER_START_REQ( cancel_timer )
     {
@@ -1772,29 +1623,20 @@ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, BO
 {
     union select_op select_op;
     UINT i, flags = SELECT_INTERRUPTIBLE;
-    unsigned int ret;
 
     if (!count || count > MAXIMUM_WAIT_OBJECTS) return STATUS_INVALID_PARAMETER_1;
 
-    if (TRACE_ON(sync))
+    if (do_esync())
     {
-        TRACE( "wait_any %u, alertable %u, handles {%p", wait_any, alertable, handles[0] );
-        for (i = 1; i < count; i++) TRACE( ", %p", handles[i] );
-        TRACE( "}, timeout %s\n", debugstr_timeout(timeout) );
-    }
-
-    if ((ret = inproc_wait( count, handles, wait_any, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
-    {
-        TRACE( "-> %#x\n", ret );
-        return ret;
+        NTSTATUS ret = esync_wait_objects( count, handles, wait_any, alertable, timeout );
+        if (ret != STATUS_NOT_IMPLEMENTED)
+            return ret;
     }
 
     if (alertable) flags |= SELECT_ALERTABLE;
     select_op.wait.op = wait_any ? SELECT_WAIT : SELECT_WAIT_ALL;
     for (i = 0; i < count; i++) select_op.wait.handles[i] = wine_server_obj_handle( handles[i] );
-    ret = server_wait( &select_op, offsetof( union select_op, wait.handles[count] ), flags, timeout );
-    TRACE( "-> %#x\n", ret );
-    return ret;
+    return server_wait( &select_op, offsetof( union select_op, wait.handles[count] ), flags, timeout );
 }
 
 
@@ -1815,14 +1657,11 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
 {
     union select_op select_op;
     UINT flags = SELECT_INTERRUPTIBLE;
-    NTSTATUS ret;
 
-    TRACE( "signal %p, wait %p, alertable %u, timeout %s\n", signal, wait, alertable, debugstr_timeout(timeout) );
+    if (do_esync())
+        return esync_signal_and_wait( signal, wait, alertable, timeout );
 
     if (!signal) return STATUS_INVALID_HANDLE;
-
-    if ((ret = inproc_signal_and_wait( signal, wait, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
 
     if (alertable) flags |= SELECT_ALERTABLE;
     select_op.signal_and_wait.op = SELECT_SIGNAL_AND_WAIT;
@@ -2066,9 +1905,6 @@ NTSTATUS WINAPI NtCreateKeyedEvent( HANDLE *handle, ACCESS_MASK access,
     data_size_t len;
     struct object_attributes *objattr;
 
-    TRACE( "access %#x, name %s, flags %#x\n", access,
-           attr ? debugstr_us(attr->ObjectName) : "(null)", flags );
-
     *handle = 0;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
@@ -2092,8 +1928,6 @@ NTSTATUS WINAPI NtCreateKeyedEvent( HANDLE *handle, ACCESS_MASK access,
 NTSTATUS WINAPI NtOpenKeyedEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
 {
     unsigned int ret;
-
-    TRACE( "access %#x, name %s\n", access, attr ? debugstr_us(attr->ObjectName) : "(null)" );
 
     *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
@@ -2121,8 +1955,6 @@ NTSTATUS WINAPI NtWaitForKeyedEvent( HANDLE handle, const void *key,
     union select_op select_op;
     UINT flags = SELECT_INTERRUPTIBLE;
 
-    TRACE( "handle %p, key %p, alertable %u, timeout %s\n", handle, key, alertable, debugstr_timeout(timeout) );
-
     if (!handle) handle = keyed_event;
     if ((ULONG_PTR)key & 1) return STATUS_INVALID_PARAMETER_1;
     if (alertable) flags |= SELECT_ALERTABLE;
@@ -2141,8 +1973,6 @@ NTSTATUS WINAPI NtReleaseKeyedEvent( HANDLE handle, const void *key,
 {
     union select_op select_op;
     UINT flags = SELECT_INTERRUPTIBLE;
-
-    TRACE( "handle %p, key %p, alertable %u, timeout %s\n", handle, key, alertable, debugstr_timeout(timeout) );
 
     if (!handle) handle = keyed_event;
     if ((ULONG_PTR)key & 1) return STATUS_INVALID_PARAMETER_1;
