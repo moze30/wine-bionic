@@ -641,6 +641,7 @@ AC_SUBST(DLLFLAGS,"")
 AC_SUBST(LDDLLFLAGS,"")
 AC_SUBST(LDEXECFLAGS,"")
 AC_SUBST(EXTRACFLAGS,"")
+AC_SUBST(WINFUSION_PE_CFLAGS,"")
 AC_SUBST(UNIXDLLFLAGS,"-fPIC")
 AC_SUBST(UNIXLDFLAGS,["-shared -Wl,-Bsymbolic -Wl,-soname,\$(UNIXLIB)"])
 AC_SUBST(TOP_INSTALL_LIB,"")
@@ -748,6 +749,7 @@ case $host_os in
     if test "x$enable_winfusion" = "xyes"
     then
       AC_DEFINE(__WINFUSION__, 1, [Define if building for WinFusion])
+      WINFUSION_PE_CFLAGS="-D__WINFUSION__"
     else
       enable_wineandroid_drv=${enable_wineandroid_drv:-yes}
       WINE_CHECK_SONAME(EGL,eglGetProcAddress)

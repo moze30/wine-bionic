@@ -41,6 +41,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 static const WCHAR default_driver[] = {'m','a','c',',','x','1','1',0};
 
 static BOOL using_root = TRUE;
+static HWND desktop_icon_hwnd;
 
 struct launcher
 {
@@ -51,6 +52,9 @@ struct launcher
 
 static WCHAR *desktop_folder;
 static WCHAR *desktop_folder_public;
+static FILETIME desktop_folder_time;
+static FILETIME desktop_folder_public_time;
+static BOOL desktop_folder_times_valid;
 
 static int icon_cx, icon_cy, icon_offset_cx, icon_offset_cy;
 static int title_cx, title_cy, title_offset_cx, title_offset_cy;
@@ -371,23 +375,32 @@ static BOOL add_launcher( const WCHAR *folder, const WCHAR *filename, int len_fi
         nb_allocated = count;
     }
 
-    if (!(launcher = malloc( sizeof(*launcher) ))) return FALSE;
+    if (!(launcher = calloc( 1, sizeof(*launcher) ))) return FALSE;
     if (!(launcher->path = append_path( folder, filename, len_filename ))) goto error;
     if (!(link = load_shelllink( launcher->path ))) goto error;
 
     launcher->icon = extract_icon( link );
     launcher->title = build_title( filename, len_filename );
     IShellLinkW_Release( link );
-    if (launcher->icon && launcher->title)
+
+    /* A shortcut without an extractable icon must not be dropped, or the
+     * desktop would silently lose shortcuts whose IconLocation is missing
+     * or points at an unusable file. Fall back to the generic application
+     * icon so the entry stays visible and launchable. */
+    if (!launcher->icon)
     {
-        launchers[nb_launchers++] = launcher;
-        return TRUE;
+        launcher->icon = LoadIconW( 0, MAKEINTRESOURCEW( OIC_SAMPLE ) );
+        if (!launcher->icon) goto error;
     }
-    free( launcher->title );
-    DestroyIcon( launcher->icon );
+    if (!launcher->title) goto error;
+
+    launchers[nb_launchers++] = launcher;
+    return TRUE;
 
 error:
+    if (launcher->icon) DestroyIcon( launcher->icon );
     free( launcher->path );
+    free( launcher->title );
     free( launcher );
     return FALSE;
 }
@@ -398,28 +411,6 @@ static void free_launcher( struct launcher *launcher )
     free( launcher->path );
     free( launcher->title );
     free( launcher );
-}
-
-static BOOL remove_launcher( const WCHAR *folder, const WCHAR *filename, int len_filename )
-{
-    UINT i;
-    WCHAR *path;
-    BOOL ret = FALSE;
-
-    if (!(path = append_path( folder, filename, len_filename ))) return FALSE;
-    for (i = 0; i < nb_launchers; i++)
-    {
-        if (!wcsicmp( launchers[i]->path, path ))
-        {
-            free_launcher( launchers[i] );
-            if (--nb_launchers)
-                memmove( &launchers[i], &launchers[i + 1], sizeof(launchers[i]) * (nb_launchers - i) );
-            ret = TRUE;
-            break;
-        }
-    }
-    free( path );
-    return ret;
 }
 
 static BOOL get_icon_text_metrics( HWND hwnd, TEXTMETRICW *tm )
@@ -438,35 +429,66 @@ static BOOL get_icon_text_metrics( HWND hwnd, TEXTMETRICW *tm )
     return ret;
 }
 
-static BOOL process_changes( const WCHAR *folder, char *buf )
+/* Posted to the desktop window when the watched folders change. The actual
+ * rescan happens in the GUI thread, so the launcher list is only ever
+ * touched from one thread. */
+#define WM_WINE_DESKTOP_LAUNCHERS_CHANGED (WM_APP + 1)
+#define DESKTOP_LAUNCHER_TIMER 1
+
+static BOOL get_folder_time( const WCHAR *folder, FILETIME *time )
 {
-    FILE_NOTIFY_INFORMATION *info = (FILE_NOTIFY_INFORMATION *)buf;
-    BOOL ret = FALSE;
+    WIN32_FILE_ATTRIBUTE_DATA data;
 
-    for (;;)
+    if (!GetFileAttributesExW( folder, GetFileExInfoStandard, &data )) return FALSE;
+    *time = data.ftLastWriteTime;
+    return TRUE;
+}
+
+static BOOL desktop_folders_changed( void )
+{
+    FILETIME folder_time, public_time;
+
+    if (!get_folder_time( desktop_folder, &folder_time ) ||
+        !get_folder_time( desktop_folder_public, &public_time ))
+        return FALSE;
+
+    if (!desktop_folder_times_valid ||
+        CompareFileTime( &folder_time, &desktop_folder_time ) != 0 ||
+        CompareFileTime( &public_time, &desktop_folder_public_time ) != 0)
     {
-        switch (info->Action)
-        {
-        case FILE_ACTION_ADDED:
-        case FILE_ACTION_RENAMED_NEW_NAME:
-            if (add_launcher( folder, info->FileName, info->FileNameLength / sizeof(WCHAR) ))
-                ret = TRUE;
-            break;
-
-        case FILE_ACTION_REMOVED:
-        case FILE_ACTION_RENAMED_OLD_NAME:
-            if (remove_launcher( folder, info->FileName, info->FileNameLength / sizeof(WCHAR) ))
-                ret = TRUE;
-            break;
-
-        default:
-            WARN( "unexpected action %lu\n", info->Action );
-            break;
-        }
-        if (!info->NextEntryOffset) break;
-        info = (FILE_NOTIFY_INFORMATION *)((char *)info + info->NextEntryOffset);
+        desktop_folder_time = folder_time;
+        desktop_folder_public_time = public_time;
+        desktop_folder_times_valid = TRUE;
+        return TRUE;
     }
-    return ret;
+    return FALSE;
+}
+
+
+static void add_folder( const WCHAR *folder );
+static BOOL create_desktop_icon_window( void );
+
+/* Rescan both desktop folders from scratch and repaint synchronously.
+ *
+ * A full rescan instead of incremental updates keeps the list consistent
+ * even when a shortcut is still being written when its FILE_NOTIFY_ADDED
+ * notification arrives: the subsequent FILE_NOTIFY_LAST_WRITE notification
+ * triggers another reload, by which time the .lnk is complete. */
+static void reload_launchers( HWND hwnd )
+{
+    unsigned int i;
+
+    for (i = 0; i < nb_launchers; i++) free_launcher( launchers[i] );
+    nb_launchers = 0;
+
+    add_folder( desktop_folder );
+    add_folder( desktop_folder_public );
+
+    TRACE( "reloaded %u launchers\n", nb_launchers );
+
+    /* Synchronous redraw so the compositor receives a fresh buffer
+     * right away instead of waiting for an idle WM_PAINT. */
+    RedrawWindow( hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW );
 }
 
 static DWORD CALLBACK watch_desktop_folders( LPVOID param )
@@ -477,7 +499,10 @@ static DWORD CALLBACK watch_desktop_folders( LPVOID param )
     OVERLAPPED ovl0, ovl1;
     char *buf0 = NULL, *buf1 = NULL;
     DWORD count, size = 4096, error = ERROR_OUTOFMEMORY;
-    BOOL ret, redraw;
+    BOOL ret;
+
+    memset( &ovl0, 0, sizeof(ovl0) );
+    memset( &ovl1, 0, sizeof(ovl1) );
 
     dir0 = CreateFileW( desktop_folder, FILE_LIST_DIRECTORY|SYNCHRONIZE, FILE_SHARE_READ|FILE_SHARE_WRITE,
                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OVERLAPPED, NULL );
@@ -494,38 +519,48 @@ static DWORD CALLBACK watch_desktop_folders( LPVOID param )
     if (!(buf0 = malloc( size ))) goto error;
     if (!(buf1 = malloc( size ))) goto error;
 
+    ret = ReadDirectoryChangesW( dir0, buf0, size, FALSE,
+                                 FILE_NOTIFY_CHANGE_FILE_NAME|FILE_NOTIFY_CHANGE_LAST_WRITE,
+                                 NULL, &ovl0, NULL );
+    if (!ret)
+    {
+        error = GetLastError();
+        goto error;
+    }
+    ret = ReadDirectoryChangesW( dir1, buf1, size, FALSE,
+                                 FILE_NOTIFY_CHANGE_FILE_NAME|FILE_NOTIFY_CHANGE_LAST_WRITE,
+                                 NULL, &ovl1, NULL );
+    if (!ret)
+    {
+        error = GetLastError();
+        goto error;
+    }
+
     for (;;)
     {
-        ret = ReadDirectoryChangesW( dir0, buf0, size, FALSE, FILE_NOTIFY_CHANGE_FILE_NAME, NULL, &ovl0, NULL );
-        if (!ret)
-        {
-            error = GetLastError();
-            goto error;
-        }
-        ret = ReadDirectoryChangesW( dir1, buf1, size, FALSE, FILE_NOTIFY_CHANGE_FILE_NAME, NULL, &ovl1, NULL );
-        if (!ret)
-        {
-            error = GetLastError();
-            goto error;
-        }
-
-        redraw = FALSE;
         switch ((error = WaitForMultipleObjects( 2, events, FALSE, INFINITE )))
         {
         case WAIT_OBJECT_0:
-            if (!GetOverlappedResult( dir0, &ovl0, &count, FALSE ) || !count) break;
-            if (process_changes( desktop_folder, buf0 )) redraw = TRUE;
+            if (!GetOverlappedResult( dir0, &ovl0, &count, FALSE )) goto error;
+            PostMessageW( hwnd, WM_WINE_DESKTOP_LAUNCHERS_CHANGED, 0, 0 );
+            ret = ReadDirectoryChangesW( dir0, buf0, size, FALSE,
+                                         FILE_NOTIFY_CHANGE_FILE_NAME|FILE_NOTIFY_CHANGE_LAST_WRITE,
+                                         NULL, &ovl0, NULL );
+            if (!ret) goto error;
             break;
 
         case WAIT_OBJECT_0 + 1:
-            if (!GetOverlappedResult( dir1, &ovl1, &count, FALSE ) || !count) break;
-            if (process_changes( desktop_folder_public, buf1 )) redraw = TRUE;
+            if (!GetOverlappedResult( dir1, &ovl1, &count, FALSE )) goto error;
+            PostMessageW( hwnd, WM_WINE_DESKTOP_LAUNCHERS_CHANGED, 0, 0 );
+            ret = ReadDirectoryChangesW( dir1, buf1, size, FALSE,
+                                         FILE_NOTIFY_CHANGE_FILE_NAME|FILE_NOTIFY_CHANGE_LAST_WRITE,
+                                         NULL, &ovl1, NULL );
+            if (!ret) goto error;
             break;
 
         default:
             goto error;
         }
-        if (redraw) InvalidateRect( hwnd, NULL, TRUE );
     }
 
 error:
@@ -598,6 +633,12 @@ static void initialize_launchers( HWND hwnd )
         CoTaskMemFree( desktop_folder );
         return;
     }
+    if (!create_desktop_icon_window())
+    {
+        ERR( "Could not create the Wayland desktop icon window\n" );
+        return;
+    }
+    ShowWindow( desktop_icon_hwnd, SW_SHOWNA );
     if ((launchers = malloc( 2 * sizeof(launchers[0]) )))
     {
         nb_allocated = 2;
@@ -607,7 +648,13 @@ static void initialize_launchers( HWND hwnd )
         add_folder( desktop_folder_public );
         if (SUCCEEDED( init )) CoUninitialize();
 
-        CreateThread( NULL, 0, watch_desktop_folders, hwnd, 0, NULL );
+        /* Ensure the initial icons are painted and submitted right away,
+         * even if no WM_PAINT would otherwise be generated after the
+         * window was created. */
+        RedrawWindow( desktop_icon_hwnd, NULL, NULL,
+                      RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW );
+
+        CreateThread( NULL, 0, watch_desktop_folders, desktop_icon_hwnd, 0, NULL );
     }
 }
 
@@ -698,6 +745,90 @@ static DWORD WINAPI clipboard_thread( void *arg )
 
 static WNDPROC desktop_orig_wndproc;
 
+static LRESULT WINAPI desktop_icon_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
+{
+    TRACE( "icon window msg %04x wp %Ix lp %Ix\n", message, wp, lp );
+
+    switch (message)
+    {
+    case WM_NCHITTEST:
+        return HTCLIENT;
+
+    case WM_SETCURSOR:
+        SetCursor( LoadCursorA( 0, (LPSTR)IDC_ARROW ) );
+        return TRUE;
+
+    case WM_ERASEBKGND:
+        PaintDesktop( (HDC)wp );
+        return TRUE;
+
+    case WM_TIMER:
+        if (wp == DESKTOP_LAUNCHER_TIMER && desktop_folders_changed())
+            reload_launchers( hwnd );
+        return 0;
+
+    case WM_LBUTTONDBLCLK:
+        if (!using_root)
+        {
+            const struct launcher *launcher = launcher_from_point( (short)LOWORD(lp),
+                                                                    (short)HIWORD(lp) );
+            if (launcher) ShellExecuteW( NULL, L"open", launcher->path, NULL, NULL, 0 );
+        }
+        return 0;
+
+    case WM_WINE_DESKTOP_LAUNCHERS_CHANGED:
+        reload_launchers( hwnd );
+        return 0;
+
+    case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            BeginPaint( hwnd, &ps );
+            if (ps.fErase) PaintDesktop( ps.hdc );
+            draw_launchers( ps.hdc, ps.rcPaint );
+            EndPaint( hwnd, &ps );
+        }
+        return 0;
+    }
+
+    return DefWindowProcW( hwnd, message, wp, lp );
+}
+
+static BOOL create_desktop_icon_window( void )
+{
+    WNDCLASSW class = {0};
+    RECT work_area;
+    int x, y, width, height;
+
+    if (!SystemParametersInfoW( SPI_GETWORKAREA, 0, &work_area, 0 ))
+    {
+        work_area.left = GetSystemMetrics( SM_XVIRTUALSCREEN );
+        work_area.top = GetSystemMetrics( SM_YVIRTUALSCREEN );
+        work_area.right = work_area.left + GetSystemMetrics( SM_CXVIRTUALSCREEN );
+        work_area.bottom = work_area.top + GetSystemMetrics( SM_CYVIRTUALSCREEN );
+    }
+    x = work_area.left;
+    y = work_area.top;
+    width = work_area.right - work_area.left;
+    height = work_area.bottom - work_area.top;
+
+    class.style = CS_DBLCLKS;
+    class.lpfnWndProc = desktop_icon_wnd_proc;
+    class.hCursor = LoadCursorA( 0, (LPSTR)IDC_ARROW );
+    class.lpszClassName = L"WineDesktopIcons";
+    class.hInstance = GetModuleHandleW( NULL );
+
+    if (!RegisterClassW( &class ) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        return FALSE;
+
+    desktop_icon_hwnd = CreateWindowExW( WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                                         class.lpszClassName, L"Wine Desktop Icons",
+                                         WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                                         x, y, width, height, 0, 0, class.hInstance, NULL );
+    if (desktop_icon_hwnd) SetTimer( desktop_icon_hwnd, DESKTOP_LAUNCHER_TIMER, 1000, NULL );
+    return desktop_icon_hwnd != 0;
+}
+
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
@@ -738,22 +869,13 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
         return 0;
 
     case WM_LBUTTONDBLCLK:
-        if (!using_root)
-        {
-            const struct launcher *launcher = launcher_from_point( (short)LOWORD(lp), (short)HIWORD(lp) );
-            if (launcher) ShellExecuteW( NULL, L"open", launcher->path, NULL, NULL, 0 );
-        }
         return 0;
 
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
             BeginPaint( hwnd, &ps );
-            if (!using_root)
-            {
-                if (ps.fErase) PaintDesktop( ps.hdc );
-                draw_launchers( ps.hdc, ps.rcPaint );
-            }
+            if (!using_root && ps.fErase) PaintDesktop( ps.hdc );
             EndPaint( hwnd, &ps );
         }
         return 0;

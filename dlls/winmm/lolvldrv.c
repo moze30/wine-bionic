@@ -60,6 +60,8 @@ static WINE_LLTYPE llTypes[MMDRV_MAX] = {
     { "WaveOut", 0, 0, -1 }
 };
 
+static INIT_ONCE drivers_lock_once = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION drivers_lock;
 static BOOL drivers_loaded;
 static int MMDrvsHi;
 static WINE_MM_DRIVER	MMDrvs[8];
@@ -67,11 +69,25 @@ static LPWINE_MLD	MM_MLDrvs[40];
 
 static void MMDRV_Init(void);
 
-static void MMDRV_InitSingleType(UINT type) {
-    if (!drivers_loaded) {
+static BOOL WINAPI MMDRV_InitLock(INIT_ONCE *once, void *param, void **context)
+{
+    (void)once;
+    (void)param;
+    (void)context;
+    InitializeCriticalSection(&drivers_lock);
+    return TRUE;
+}
+
+static void MMDRV_InitSingleType(UINT type)
+{
+    InitOnceExecuteOnce(&drivers_lock_once, MMDRV_InitLock, NULL, NULL);
+    EnterCriticalSection(&drivers_lock);
+    if (!drivers_loaded)
+    {
         drivers_loaded = TRUE;
         MMDRV_Init();
     }
+    LeaveCriticalSection(&drivers_lock);
 }
 
 /**************************************************************************
@@ -496,27 +512,31 @@ static void MMDRV_Init(void)
 
     TRACE("()\n");
 
+#ifdef __WINFUSION__
+    MMDRV_Install("winfusionmidi", "winewinfusion.drv", FALSE);
+#endif
+
     init_hr = CoInitialize(NULL);
 
     hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL,
             CLSCTX_INPROC_SERVER, &IID_IMMDeviceEnumerator, (void**)&devenum);
     if(FAILED(hr)){
         ERR("CoCreateInstance failed: %08lx\n", hr);
-        goto exit;
+        goto mappers;
     }
 
     hr = IMMDeviceEnumerator_GetDevice(devenum, L"Wine info device", &device);
     IMMDeviceEnumerator_Release(devenum);
     if(FAILED(hr)){
         ERR("GetDevice failed: %08lx\n", hr);
-        goto exit;
+        goto mappers;
     }
 
     hr = IMMDevice_OpenPropertyStore(device, STGM_READ, &ps);
     if(FAILED(hr)){
         ERR("OpenPropertyStore failed: %08lx\n", hr);
         IMMDevice_Release(device);
-        goto exit;
+        goto mappers;
     }
 
     hr = IPropertyStore_GetValue(ps,
@@ -525,7 +545,7 @@ static void MMDRV_Init(void)
     IMMDevice_Release(device);
     if(FAILED(hr)){
         ERR("GetValue failed: %08lx\n", hr);
-        goto exit;
+        goto mappers;
     }
 
     size = WideCharToMultiByte(CP_ACP, 0, pv.pwszVal, -1,
@@ -538,10 +558,10 @@ static void MMDRV_Init(void)
     free(drvA);
     PropVariantClear(&pv);
 
+mappers:
     MMDRV_Install("wavemapper", "msacm32.drv", TRUE);
     MMDRV_Install("midimapper", "midimap.dll", TRUE);
 
-exit:
     if(SUCCEEDED(init_hr))
         CoUninitialize();
 }
