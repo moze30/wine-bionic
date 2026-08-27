@@ -3769,6 +3769,7 @@ void virtual_init(void)
 #else
     size = 2 * view_block_size + (1U << (32 - page_shift));
 #endif
+    size = ROUND_SIZE( 0, size, host_page_mask );
     view_block_start = alloc_virtual_heap( size );
     assert( view_block_start != MAP_FAILED );
     view_block_end = view_block_start + view_block_size / sizeof(*view_block_start);

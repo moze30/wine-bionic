@@ -1073,6 +1073,11 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice phys_dev_handle, const VkDeviceCre
     ALL_VK_DEVICE_FUNCS()
 #undef USE_VK_FUNC
 
+    /* resolve swapchain creation through the instance dispatch path, as
+     * GetDeviceProcAddr for swapchain entry points is unreliable under Box64 */
+    object->funcs.p_vkCreateSwapchainKHR = (void *)vk_funcs->p_vkGetInstanceProcAddr(
+        instance->host_instance, "vkCreateSwapchainKHR");
+
     /* We need to cache all queues within the device as each requires wrapping since queues are
      * dispatchable objects.
      */
