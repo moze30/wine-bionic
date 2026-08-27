@@ -109,6 +109,13 @@ static uint32_t wine_vk_count_struct_(void *s, VkStructureType t)
 
 const struct vulkan_funcs *vk_funcs;
 
+static void *wine_vk_get_host_instance_proc_addr(VkInstance instance, const char *name)
+{
+    if (!strcmp(name, "vkGetPhysicalDeviceCooperativeVectorPropertiesNV"))
+        return NULL;
+    return (void *)vk_funcs->p_vkGetInstanceProcAddr(instance, name);
+}
+
 #define wine_vk_find_unlink_struct(s, t) wine_vk_find_unlink_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
 static void *wine_vk_find_unlink_struct_(void *s, VkStructureType t)
 {
