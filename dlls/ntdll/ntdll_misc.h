@@ -47,11 +47,7 @@ static const USHORT current_machine = IMAGE_FILE_MACHINE_ARM64;
 static const USHORT current_machine = IMAGE_FILE_MACHINE_UNKNOWN;
 #endif
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 static const UINT_PTR page_size = 0x1000;
-#else
-extern UINT_PTR page_size;
-#endif
 
 extern BOOL delay_heap_free;
 extern BOOL heap_zero_hack;

@@ -827,6 +827,7 @@ struct pe_image_info
     mem_size_t     stack_commit;
     unsigned int   entry_point;
     unsigned int   map_size;
+    unsigned int   alignment;
     unsigned int   zerobits;
     unsigned int   subsystem;
     unsigned short subsystem_minor;
