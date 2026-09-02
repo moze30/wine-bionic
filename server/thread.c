@@ -570,6 +570,7 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
     if (!(thread->sync = create_internal_sync( 1, 0 ))) goto error;
     if (get_inproc_device_fd() >= 0 && !(thread->alert_sync = create_inproc_internal_sync( 1, 0 ))) goto error;
 
+
     if (process->desktop)
     {
         if (!(desktop = get_desktop_obj( process, process->desktop, 0 ))) clear_error();  /* ignore errors */
@@ -665,6 +666,7 @@ static void destroy_thread( struct object *obj )
     if (thread->token) release_object( thread->token );
     if (thread->alert_sync) release_object( thread->alert_sync );
     if (thread->sync) release_object( thread->sync );
+
 }
 
 /* dump a thread on stdout for debugging purposes */
@@ -683,6 +685,7 @@ static struct object *thread_get_sync( struct object *obj )
     assert( obj->ops == &thread_ops );
     return grab_object( thread->sync );
 }
+
 
 static unsigned int thread_map_access( struct object *obj, unsigned int access )
 {
@@ -1424,6 +1427,7 @@ void wake_up( struct object *obj, int max )
     struct list *ptr;
     int ret;
 
+
     LIST_FOR_EACH( ptr, &obj->wait_queue )
     {
         struct wait_queue_entry *entry = LIST_ENTRY( ptr, struct wait_queue_entry, entry );
@@ -1511,6 +1515,7 @@ static int queue_apc( struct process *process, struct thread *thread, struct thr
         if (apc->call.type == APC_USER && thread->alert_sync)
             signal_inproc_sync( thread->alert_sync );
         wake_thread( thread );
+
     }
 
     return 1;
@@ -1562,6 +1567,8 @@ static struct thread_apc *thread_dequeue_apc( struct thread *thread, int system 
         if (list_empty( &thread->user_apc ) && thread->alert_sync)
             reset_inproc_sync( thread->alert_sync );
     }
+
+
     return apc;
 }
 

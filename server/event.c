@@ -113,7 +113,9 @@ struct event_sync *create_server_internal_sync( int manual, int signaled )
 
 struct object *create_internal_sync( int manual, int signaled )
 {
-    if (get_inproc_device_fd() >= 0) return (struct object *)create_inproc_internal_sync( manual, signaled );
+    int ifd = get_inproc_device_fd();
+    fprintf( stderr, "WINE_BOOT_DEBUG: create_internal_sync ifd=%d\n", ifd );
+    if (ifd >= 0) return (struct object *)create_inproc_internal_sync( manual, signaled );
     return (struct object *)create_server_internal_sync( manual, signaled );
 }
 
@@ -251,6 +253,7 @@ struct event *create_event( struct object *root, const struct unicode_str *name,
             event->sync = NULL;
             list_init( &event->kernel_object );
 
+
             if (!(event->sync = create_event_sync( manual_reset, initial_state )))
             {
                 release_object( event );
@@ -268,11 +271,13 @@ struct event *get_event_obj( struct process *process, obj_handle_t handle, unsig
 
 void set_event( struct event *event )
 {
+
     signal_sync( event->sync );
 }
 
 void reset_event( struct event *event )
 {
+
     reset_sync( event->sync );
 }
 
@@ -289,6 +294,7 @@ static struct object *event_get_sync( struct object *obj )
     assert( obj->ops == &event_ops );
     return grab_object( event->sync );
 }
+
 
 static int event_signal( struct object *obj, unsigned int access, int signal )
 {

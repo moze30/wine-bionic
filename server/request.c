@@ -47,6 +47,9 @@
 #ifdef __APPLE__
 # include <mach/mach_time.h>
 #endif
+#ifdef __WINFUSION__
+# include <winfusion_utils.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -668,7 +671,12 @@ static char *create_server_dir( int force )
 
     /* create the base directory if needed */
 
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+#ifdef __WINFUSION__
+    char *tmp_dir = get_winfusion_tmp_dir();
+    if (asprintf( &base_dir, "%s/.wine-%u", tmp_dir, getuid() ) == -1)
+        fatal_error( "out of memory\n" );
+    free( tmp_dir );
+#elif defined(__ANDROID__)  /* there's no /tmp dir on Android */
     if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
         fatal_error( "out of memory\n" );
 #else
@@ -796,7 +804,9 @@ static void acquire_lock(void)
     struct flock fl;
     int fd, slen, got_lock = 0;
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock create_server_lock\n" );
     fd = create_server_lock();
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock create_server_lock done fd=%d\n", fd );
 
     fl.l_type   = F_WRLCK;
     fl.l_whence = SEEK_SET;
@@ -838,7 +848,9 @@ static void acquire_lock(void)
         close( fd );
     }
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock socket\n" );
     if ((fd = socket( AF_UNIX, SOCK_STREAM, 0 )) == -1) fatal_error( "socket: %s\n", strerror( errno ));
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock bind\n" );
     addr.sun_family = AF_UNIX;
     strcpy( addr.sun_path, server_socket_name );
     slen = sizeof(addr) - sizeof(addr.sun_path) + strlen(addr.sun_path) + 1;
@@ -859,11 +871,14 @@ static void acquire_lock(void)
     chmod( server_socket_name, 0600 );  /* make sure no other user can connect */
     if (listen( fd, 5 ) == -1) fatal_error( "listen: %s\n", strerror( errno ));
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock alloc_object\n" );
     if (!(master_socket = alloc_object( &master_socket_ops )) ||
         !(master_socket->fd = create_anonymous_fd( &master_socket_fd_ops, fd, &master_socket->obj, 0 )))
         fatal_error( "out of memory\n" );
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock alloc_object done\n" );
     set_fd_events( master_socket->fd, POLLIN );
     make_object_permanent( &master_socket->obj );
+    fprintf( stderr, "WINE_BOOT_DEBUG: acquire_lock done\n" );
 }
 
 /* open the master server socket and start waiting for new clients */
@@ -880,7 +895,9 @@ void open_master_socket(void)
     fd = open( "/dev/null", O_RDWR );
     while (fd >= 0 && fd <= 2) fd = dup( fd );
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: create_server_dir begin\n" );
     server_dir = create_server_dir( 1 );
+    fprintf( stderr, "WINE_BOOT_DEBUG: create_server_dir done=%s\n", server_dir ? server_dir : "(null)" );
 
     if (!foreground)
     {
@@ -889,10 +906,13 @@ void open_master_socket(void)
         switch( pid )
         {
         case 0:  /* child */
+            fprintf( stderr, "WINE_BOOT_DEBUG: wineserver child: setsid\n" );
             setsid();
             close( sync_pipe[0] );
 
+            fprintf( stderr, "WINE_BOOT_DEBUG: wineserver child: acquire_lock\n" );
             acquire_lock();
+            fprintf( stderr, "WINE_BOOT_DEBUG: wineserver child: acquire_lock done\n" );
 
             /* close stdin and stdout */
             dup2( fd, 0 );

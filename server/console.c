@@ -957,6 +957,7 @@ static struct object *console_server_get_sync( struct object *obj )
     return grab_object( server->sync );
 }
 
+
 static struct object *console_server_open_file( struct object *obj, unsigned int access,
                                                 unsigned int sharing, unsigned int options )
 {
@@ -976,6 +977,7 @@ static struct object *create_console_server( void )
     server->term_fd    = -1;
     list_init( &server->queue );
     list_init( &server->read_queue );
+
 
     if (!(server->sync = create_internal_sync( 1, 1 ))) goto error;
     if (!(server->fd = alloc_pseudo_fd( &console_server_fd_ops, &server->obj, FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;

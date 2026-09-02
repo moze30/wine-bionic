@@ -454,6 +454,10 @@ void fsync_init( DWORD pid )
 {
     struct stat st;
 
+#if defined(__ANDROID__)
+    fsync_enabled = 0;
+    return;
+#endif
 
     fsync_enabled = 1;
     syscall( __NR_futex_waitv, NULL, 0, 0, NULL, 0 );
@@ -471,6 +475,7 @@ void fsync_init( DWORD pid )
     else
         sprintf( shm_name, "/wine-%lx-fsync", (unsigned long)st.st_ino );
 
+#ifdef HAVE_SHM_OPEN
     if ((shm_fd = shm_open( shm_name, O_RDWR, 0644 )) == -1)
     {
         /* probably the server isn't running with WINEFSYNC, tell the user and bail */
@@ -480,6 +485,10 @@ void fsync_init( DWORD pid )
             ERR("Failed to initialize shared memory: %s\n", strerror( errno ));
         exit(1);
     }
+#else
+    ERR("fsync is not supported on this platform (no shm_open).\n");
+    exit(1);
+#endif
 
     current_pid = pid;
     assert( current_pid );
@@ -958,8 +967,7 @@ NTSTATUS fsync_wait_objects( DWORD count, const HANDLE *handles,
 
             if (timeout && !timeout->QuadPart)
             {
-                /* Unlike esync, we already know that we've timed out, so we
-                 * can avoid a syscall. */
+                /* We already know that we've timed out, so we can avoid a syscall. */
                 TRACE("Wait timed out.\n");
                 put_objects( objs, count );
                 return STATUS_TIMEOUT;

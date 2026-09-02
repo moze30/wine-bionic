@@ -186,12 +186,14 @@ int main( int argc, char *argv[] )
 {
     void *handle;
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: main start argc=%d argv0=%s\n", argc, argv[0] ? argv[0] : "(null)" );
     init_reserved_areas();
 
     if ((handle = try_dlopen( get_self_exe() )) ||
         (handle = try_dlopen( argv[0] )))
     {
         void (*init_func)(int, char **) = dlsym( handle, "__wine_main" );
+        fprintf( stderr, "WINE_BOOT_DEBUG: ntdll.so loaded handle=%p init_func=%p\n", handle, init_func );
         if (init_func) init_func( argc, argv );
         fprintf( stderr, "wine: __wine_main function not found in ntdll.so\n" );
         exit(1);

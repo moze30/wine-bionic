@@ -78,7 +78,7 @@
 #else
   extern char **environ;
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && !defined(__WINFUSION__)
 # include <jni.h>
 #endif
 
@@ -340,7 +340,11 @@ static const char *get_pe_dir( WORD machine )
     switch(machine)
     {
     case IMAGE_FILE_MACHINE_I386:  return "/i386-windows";
+#ifdef __aarch64__
+    case IMAGE_FILE_MACHINE_AMD64: return "/aarch64-windows";
+#else
     case IMAGE_FILE_MACHINE_AMD64: return "/x86_64-windows";
+#endif
     case IMAGE_FILE_MACHINE_ARMNT: return "/arm-windows";
     case IMAGE_FILE_MACHINE_ARM64: return "/aarch64-windows";
     default: return "";
@@ -695,9 +699,12 @@ void start_server( BOOL debug )
 
         argv[1] = debug ? debug_flag : NULL;
         argv[2] = NULL;
+        fprintf( stderr, "WINE_BOOT_DEBUG: exec_wineserver begin (bin_dir=%s)\n", bin_dir ? bin_dir : "(null)" );
         if (exec_wineserver( &pid, argv )) fatal_error( "could not exec wineserver\n" );
+        fprintf( stderr, "WINE_BOOT_DEBUG: exec_wineserver ok pid=%d, waitpid...\n", (int)pid );
         waitpid( pid, &status, 0 );
         status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+        fprintf( stderr, "WINE_BOOT_DEBUG: wineserver waitpid done status=%d\n", status );
         if (status == 2) return;  /* server lock held by someone else, will retry later */
         if (status) exit(status);  /* server failed */
         started = TRUE;
@@ -1785,6 +1792,81 @@ NTSTATUS load_builtin( const struct pe_image_info *image_info, UNICODE_STRING *n
 }
 
 
+/***********************************************************************
+ *           load_unixlib_by_name
+ */
+NTSTATUS load_unixlib_by_name( const UNICODE_STRING *nt_name, void **handle_ret )
+{
+    unsigned int i, pos, namepos, maxlen = 0;
+    unsigned int len = nt_name->Length / sizeof(WCHAR);
+    const char *so_dir = get_so_dir( current_machine );
+    char *ptr = NULL, *file, *ext = NULL;
+    void *handle = NULL;
+
+    if (!len) return STATUS_DLL_NOT_FOUND;
+
+    for (i = namepos = 0; i < len; i++)
+        if (nt_name->Buffer[i] == '/' || nt_name->Buffer[i] == '\\') break;
+
+    if (i < len)  /* explicit path */
+    {
+        UNICODE_STRING true_nt_name;
+        OBJECT_ATTRIBUTES attr;
+
+        InitializeObjectAttributes( &attr, (UNICODE_STRING *)nt_name, 0, 0, NULL );
+        if (!get_nt_and_unix_names( &attr, &true_nt_name, &file, FILE_OPEN, FALSE ))
+            handle = dlopen( file, RTLD_NOW );
+        free( true_nt_name.Buffer );
+        goto done;
+    }
+
+    if (build_dir) maxlen = strlen(build_dir) + sizeof("/dlls/") + len;
+    maxlen = max( maxlen, dll_path_maxlen + 1 ) + len + sizeof("/aarch64-unix") + sizeof(".so");
+
+    if (!(file = malloc( maxlen ))) return STATUS_NO_MEMORY;
+
+    pos = maxlen - len - 4;
+    ext = file + pos + len;
+    /* we don't want to depend on the current codepage here */
+    for (i = 0; i < len; i++)
+    {
+        if (nt_name->Buffer[namepos + i] > 127) goto done;
+        file[pos + i] = (char)nt_name->Buffer[namepos + i];
+        if (file[pos + i] >= 'A' && file[pos + i] <= 'Z') file[pos + i] += 'a' - 'A';
+        else if (file[pos + i] == '.') ext = file + pos + i;
+    }
+    file[pos + len] = 0;
+    file[--pos] = '/';
+
+    if (build_dir)
+    {
+        ptr = prepend_build_dir_path( file + pos, ".so", "", "/dlls", build_dir );
+        strcpy( ext, ".so" );
+        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
+    }
+
+    strcpy( ext, ".so" );
+    for (i = 0; dll_paths[i]; i++)
+    {
+        ptr = prepend( file + pos, so_dir, strlen(so_dir) );
+        ptr = prepend( ptr, dll_paths[i], strlen(dll_paths[i]) );
+        WARN_(module)( "load_unixlib_by_name: trying %s\n", ptr );
+        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
+
+        ptr = prepend( file + pos, dll_paths[i], strlen(dll_paths[i]) );
+        WARN_(module)( "load_unixlib_by_name: trying %s\n", ptr );
+        if ((handle = dlopen( ptr, RTLD_NOW ))) goto done;
+    }
+    WARN_(module)( "load_unixlib_by_name: no unixlib found for %s\n", file + pos );
+
+ done:
+    free( file );
+    if (!handle) return STATUS_DLL_NOT_FOUND;
+    *handle_ret = handle;
+    return STATUS_SUCCESS;
+}
+
+
 /***************************************************************************
  *	get_machine_wow64_dir
  *
@@ -2439,9 +2521,12 @@ static void start_main_thread(void)
 {
     TEB *teb = virtual_alloc_first_teb();
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: start_main_thread begin\n" );
     signal_init_threading();
     dbg_init();
+    fprintf( stderr, "WINE_BOOT_DEBUG: server_init_process begin\n" );
     startup_info_size = server_init_process();
+    fprintf( stderr, "WINE_BOOT_DEBUG: server_init_process done size=%lu\n", (unsigned long)startup_info_size );
     hacks_init();
     virtual_map_user_shared_data();
     init_cpu_info();
@@ -2451,20 +2536,26 @@ static void start_main_thread(void)
     set_thread_teb( teb );
 #endif
 
+#ifdef M_PERTURB
     mallopt( M_PERTURB, 0xff );
+#endif
     init_startup_info();
     *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
     set_load_order_app_name( main_wargv[0] );
     init_thread_stack( teb, 0, 0, 0 );
     NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
+    fprintf( stderr, "WINE_BOOT_DEBUG: load_ntdll begin\n" );
     load_ntdll();
+    fprintf( stderr, "WINE_BOOT_DEBUG: load_ntdll done\n" );
     load_wow64_ntdll( main_image_info.Machine );
     load_apiset_dll();
+#ifdef M_PERTURB
     mallopt( M_PERTURB, 0 );
+#endif
     server_init_process_done();
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && !defined(__WINFUSION__)
 
 #ifndef WINE_JAVA_CLASS
 #define WINE_JAVA_CLASS "org/winehq/wine/WineActivity"
@@ -2584,7 +2675,7 @@ jint JNI_OnLoad( JavaVM *vm, void *reserved )
     return JNI_VERSION_1_6;
 }
 
-#endif  /* __ANDROID__ */
+#endif  /* defined(__ANDROID__) && !defined(__WINFUSION__) */
 
 #ifdef __APPLE__
 static void *apple_wine_thread( void *arg )
@@ -2818,7 +2909,9 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
     main_argc = argc;
     main_argv = argv;
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: __wine_main start\n" );
     init_paths();
+    fprintf( stderr, "WINE_BOOT_DEBUG: init_paths done\n" );
     if (!getenv( "WINELOADERNOEXEC" ) || argc <= 1) check_command_line( argc, argv );
     unsetenv( "WINELOADERNOEXEC" );
 
@@ -2832,11 +2925,15 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
     set_max_limit( RLIMIT_NICE );
 #endif
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: before virtual_init\n" );
     virtual_init();
+    fprintf( stderr, "WINE_BOOT_DEBUG: virtual_init done\n" );
     init_environment();
+    fprintf( stderr, "WINE_BOOT_DEBUG: init_environment done\n" );
 
 #ifdef __APPLE__
     apple_main_thread();
 #endif
     start_main_thread();
+    fprintf( stderr, "WINE_BOOT_DEBUG: start_main_thread done\n" );
 }

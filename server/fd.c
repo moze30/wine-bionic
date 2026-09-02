@@ -1745,8 +1745,12 @@ static struct fd *alloc_fd_object(void)
     list_init( &fd->inode_entry );
     list_init( &fd->locks );
 
+
+    fprintf( stderr, "WINE_BOOT_DEBUG: alloc_fd_object create_internal_sync\n" );
     if (!(fd->sync = create_internal_sync( 1, 1 ))) goto error;
+    fprintf( stderr, "WINE_BOOT_DEBUG: alloc_fd_object create_internal_sync done\n" );
     if ((fd->poll_index = add_poll_user( fd )) == -1) goto error;
+    fprintf( stderr, "WINE_BOOT_DEBUG: alloc_fd_object add_poll_user done\n" );
 
     return fd;
 
@@ -1787,6 +1791,7 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     init_async_queue( &fd->wait_q );
     list_init( &fd->inode_entry );
     list_init( &fd->locks );
+
 
     if (!(fd->sync = create_internal_sync( 1, 1 )))
     {
@@ -2116,7 +2121,9 @@ error:
 struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops, int unix_fd, struct object *user,
                                 unsigned int options )
 {
+    fprintf( stderr, "WINE_BOOT_DEBUG: create_anonymous_fd begin\n" );
     struct fd *fd = alloc_fd_object();
+    fprintf( stderr, "WINE_BOOT_DEBUG: create_anonymous_fd alloc_fd_object=%p\n", (void *)fd );
 
     if (fd)
     {
@@ -2222,6 +2229,7 @@ struct object *default_fd_get_sync( struct object *obj )
     release_object( fd );
     return sync;
 }
+
 
 /* default get_full_name() routine for objects with an fd */
 WCHAR *default_fd_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len )

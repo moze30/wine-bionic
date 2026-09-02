@@ -762,6 +762,7 @@ static void delete_file( struct device_file *file )
     /* terminate all pending requests */
     LIST_FOR_EACH_ENTRY_SAFE( irp, next, &file->requests, struct irp_call, dev_entry )
     {
+
         list_remove( &irp->mgr_entry );
         set_irp_result( irp, STATUS_FILE_DELETED, NULL, 0, 0 );
     }
@@ -797,6 +798,7 @@ static struct object *device_manager_get_sync( struct object *obj )
     assert( obj->ops == &device_manager_ops );
     return grab_object( manager->sync );
 }
+
 
 static void device_manager_destroy( struct object *obj )
 {
@@ -847,6 +849,7 @@ static struct device_manager *create_device_manager(void)
         list_init( &manager->devices );
         list_init( &manager->requests );
         wine_rb_init( &manager->kernel_objects, compare_kernel_object );
+
 
         if (!(manager->sync = create_internal_sync( 1, 0 )))
         {
@@ -1040,6 +1043,7 @@ DECL_HANDLER(get_next_device_request)
                 list_remove( &irp->mgr_entry );
                 list_init( &irp->mgr_entry );
                 if (list_empty( &manager->requests )) reset_sync( manager->sync );
+
 
                 /* we already own the object if it's only on manager queue */
                 if (irp->file) grab_object( irp );

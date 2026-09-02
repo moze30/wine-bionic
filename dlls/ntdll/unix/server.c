@@ -70,6 +70,9 @@
 #define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 #endif
 #endif
+#ifdef __WINFUSION__
+# include <winfusion_utils.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -1316,7 +1319,11 @@ static const char *init_server_dir( dev_t dev, ino_t ino )
 {
     char *dir = NULL;
 
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+#ifdef __WINFUSION__
+    char *tmp_dir = get_winfusion_tmp_dir();
+    asprintf( &dir, "%s/.wine-%u/server-%llx-%llx", tmp_dir, getuid(), (unsigned long long)dev, (unsigned long long)ino );
+    free( tmp_dir );
+#elif defined(__ANDROID__)  /* there's no /tmp dir on Android */
     asprintf( &dir, "%s/.wineserver/server-%llx-%llx", config_dir, (unsigned long long)dev, (unsigned long long)ino );
 #else
     asprintf( &dir, "/tmp/.wine-%u/server-%llx-%llx", getuid(), (unsigned long long)dev, (unsigned long long)ino );
@@ -1362,7 +1369,13 @@ static int setup_config_dir(void)
     {
         mkdir( "drive_c", 0777 );
         symlink( "../drive_c", "dosdevices/c:" );
+#ifdef __WINFUSION__
+        char *rootfs_dir = get_winfusion_rootfs_dir();
+        symlink( rootfs_dir, "dosdevices/z:" );
+        free( rootfs_dir );
+#else
         symlink( "/", "dosdevices/z:" );
+#endif
     }
     else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
 
@@ -1631,7 +1644,9 @@ size_t server_init_process(void)
         if (arch && strcmp( arch, "win32" ) && strcmp( arch, "win64" ) && strcmp( arch, "wow64" ))
             fatal_error( "WINEARCH set to invalid value '%s', it must be win32, win64, or wow64.\n", arch );
 
+        fprintf( stderr, "WINE_BOOT_DEBUG: server_connect begin\n" );
         fd_socket = server_connect();
+        fprintf( stderr, "WINE_BOOT_DEBUG: server_connect done fd=%d\n", fd_socket );
     }
 
     /* setup the signal mask */
@@ -1646,7 +1661,9 @@ size_t server_init_process(void)
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
 
     /* receive the first thread request fd on the main socket */
+    fprintf( stderr, "WINE_BOOT_DEBUG: wine_server_receive_fd begin\n" );
     data->request_fd = wine_server_receive_fd( &version );
+    fprintf( stderr, "WINE_BOOT_DEBUG: wine_server_receive_fd done fd=%d version=%u\n", data->request_fd, version );
 
 #ifdef SO_PASSCRED
     /* now that we hopefully received the server_pid, disable SO_PASSCRED */
@@ -1974,6 +1991,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      * retrieve it again */
     fd = remove_fd_from_cache( handle );
     close_inproc_sync( handle );
+
 
     SERVER_START_REQ( close_handle )
     {

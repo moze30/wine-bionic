@@ -50,10 +50,12 @@ int get_inproc_device_fd(void)
     static int fd = -2;
     if (fd == -2)
     {
+        fprintf( stderr, "WINE_BOOT_DEBUG: get_inproc_device_fd open /dev/ntsync\n" );
         if (getenv( "PROTON_NO_NTSYNC" ) && atoi(getenv( "PROTON_NO_NTSYNC" )))
             fd = -1;
         else
             fd = open( "/dev/ntsync", O_CLOEXEC | O_RDONLY );
+        fprintf( stderr, "WINE_BOOT_DEBUG: get_inproc_device_fd open result=%d\n", fd );
         if (fd >= 0)
         {
             do_fsync_cached = 0;

@@ -56,7 +56,7 @@ int do_fsync_cached = -1;
 
 int fsync_check_support(void)
 {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     syscall( __NR_futex_waitv, 0, 0, 0, 0, 0 );
     return getenv( "WINEFSYNC" ) && atoi(getenv( "WINEFSYNC" )) && errno != ENOSYS && errno != EPERM;
 #else
@@ -81,8 +81,10 @@ static uint32_t shm_idx_free_search_start_hint;
 static void shm_cleanup(void)
 {
     close( shm_fd );
+#ifdef HAVE_SHM_OPEN
     if (shm_unlink( shm_name ) == -1)
         perror( "shm_unlink" );
+#endif
 }
 
 void fsync_init(void)
@@ -97,12 +99,17 @@ void fsync_init(void)
     else
         sprintf( shm_name, "/wine-%lx-fsync", (unsigned long)st.st_ino );
 
+#ifdef HAVE_SHM_OPEN
     if (!shm_unlink( shm_name ))
         fprintf( stderr, "fsync: warning: a previous shm file %s was not properly removed\n", shm_name );
 
     shm_fd = shm_open( shm_name, O_RDWR | O_CREAT | O_EXCL, 0644 );
     if (shm_fd == -1)
         perror( "shm_open" );
+#else
+    fprintf( stderr, "fsync: not supported on this platform (no shm_open).\n" );
+    shm_fd = -1;
+#endif
 
     shm_addrs = calloc( 128, sizeof(shm_addrs[0]) );
     shm_addrs_size = 128;

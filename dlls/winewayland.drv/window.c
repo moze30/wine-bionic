@@ -174,7 +174,7 @@ static void wayland_win_data_get_config(struct wayland_win_data *data,
     }
 
     conf->state = window_state;
-    conf->scale = NtUserGetSystemDpiForProcess(0) / 96.0;
+    conf->scale = 1.0;
     conf->visible = (style & WS_VISIBLE) == WS_VISIBLE;
     conf->managed = data->managed;
 }
@@ -459,6 +459,13 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UIN
     data->rects = *new_rects;
     data->is_fullscreen = fullscreen;
     data->managed = managed;
+
+    /* xdg_toplevel.set_minimized is only a compositor hint and may leave
+     * the last committed buffer visible. Detach and destroy the toplevel
+     * while the Win32 window is iconic; the normal restore path recreates
+     * it on the next WindowPosChanged with a real window surface. */
+    if (NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)
+        surface = NULL;
 
     if (!surface)
     {

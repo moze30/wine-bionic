@@ -247,6 +247,7 @@ static void init_limits(void)
 int main( int argc, char *argv[] )
 {
     setvbuf( stderr, NULL, _IOLBF, 0 );
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver main start\n" );
     server_argv0 = argv[0];
     parse_options( argc, argv, "d::fhk::p::vw", long_options, option_callback );
 
@@ -259,8 +260,11 @@ int main( int argc, char *argv[] )
     signal( SIGABRT, sigterm_handler );
     init_limits();
 
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver sock_init\n" );
     sock_init();
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver open_master_socket\n" );
     open_master_socket();
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver open_master_socket done\n" );
 
     if (do_fsync())
         fsync_init();
@@ -270,9 +274,12 @@ int main( int argc, char *argv[] )
     init_signals();
     init_memory();
     init_user_sid();
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver init_directories\n" );
     init_directories( load_intl_file() );
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver init_directories done\n" );
     init_threading();
     init_registry();
+    fprintf( stderr, "WINE_BOOT_DEBUG: wineserver main_loop\n" );
     main_loop();
     return 0;
 }

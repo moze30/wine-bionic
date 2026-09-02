@@ -760,6 +760,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     if (!process->handles || !process->token) goto error;
     process->session_id = token_get_session_id( process->token );
 
+
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */
 
     if (!parent) return process;
@@ -794,6 +795,7 @@ data_size_t get_process_startup_info_size( struct process *process )
     if (!info) return 0;
     return info->data_size;
 }
+
 
 /* destroy a process when its refcount is 0 */
 static void process_destroy( struct object *obj )

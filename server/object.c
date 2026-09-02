@@ -303,6 +303,7 @@ WCHAR *default_get_full_name( struct object *obj, data_size_t max, data_size_t *
 void *alloc_object( const struct object_ops *ops )
 {
     struct object *obj = mem_alloc( ops->size );
+    fprintf( stderr, "WINE_BOOT_DEBUG: alloc_object size=%lu ops=%p obj=%p\n", (unsigned long)ops->size, (void *)ops, (void *)obj );
     if (obj)
     {
         obj->refcount     = 1;

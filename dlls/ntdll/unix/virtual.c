@@ -100,6 +100,10 @@
 #include "unix_private.h"
 #include "wine/debug.h"
 
+#ifdef __ANDROID__
+#include "../../android/shm_utils/shm_utils.h"
+#endif
+
 WINE_DEFAULT_DEBUG_CHANNEL(virtual);
 WINE_DECLARE_DEBUG_CHANNEL(module);
 WINE_DECLARE_DEBUG_CHANNEL(virtual_ranges);
@@ -307,6 +311,9 @@ static const UINT_PTR host_page_size = 0x1000;
 static const UINT_PTR host_page_mask = 0xfff;
 #endif
 
+#define FEX_STATS_SHM_MAX_SIZE 0x400000
+static void *fex_stats_shm;
+
 /* Note: these are Windows limits, you cannot change them. */
 #if defined(__i386__) || defined(__x86_64__)
 static void *address_space_start = (void *)0x110000; /* keep DOS area clear */
@@ -314,9 +321,15 @@ static void *address_space_start = (void *)0x110000; /* keep DOS area clear */
 static void *address_space_start = (void *)0x10000;
 #endif
 #ifdef _WIN64
+#ifdef __ANDROID__
+static void *address_space_limit = (void *)0x7fffff0000;  /* top of the total available address space */
+static void *user_space_limit    = (void *)0x7fffff0000;  /* top of the user address space */
+static void *working_set_limit   = (void *)0x7fffff0000;  /* top of the current working set */
+#else
 static void *address_space_limit = (void *)0x7fffffff0000;  /* top of the total available address space */
 static void *user_space_limit    = (void *)0x7fffffff0000;  /* top of the user address space */
 static void *working_set_limit   = (void *)0x7fffffff0000;  /* top of the current working set */
+#endif
 #else
 static void *address_space_limit = (void *)0xc0000000;
 static void *user_space_limit    = (void *)0x7fff0000;
@@ -413,6 +426,7 @@ void *anon_mmap_alloc( size_t size, int prot )
 #ifdef USE_UFFD_WRITEWATCH
 static void kernel_writewatch_init(void)
 {
+#ifndef __ANDROID__
     struct uffdio_api uffdio_api;
 
     uffd_fd = syscall( __NR_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY );
@@ -434,6 +448,10 @@ static void kernel_writewatch_init(void)
     }
     use_kernel_writewatch = 1;
     TRACE( "Using kernel write watches.\n" );
+#else
+    TRACE( "Kernel writewatches are not supported on Android\n" );
+    use_kernel_writewatch = 0;
+#endif
 }
 
 static void kernel_writewatch_reset( void *start, SIZE_T len )
@@ -986,6 +1004,18 @@ static void load_steam_overlay(const char *unix_lib_path)
         FIXME( "HACK: tried to load %s, handle %p.\n", debugstr_a(path), handle );
     }
 }
+
+/***********************************************************************
+ *           get_unixlib_funcs
+ */
+static NTSTATUS get_unixlib_funcs( void *so_handle, BOOL wow, const void **funcs )
+{
+    const char *name = wow ? "__wine_unix_call_wow64_funcs" : "__wine_unix_call_funcs";
+
+    *funcs = dlsym( so_handle, name );
+    return *funcs ? STATUS_SUCCESS : STATUS_ENTRYPOINT_NOT_FOUND;
+}
+
 
 /***********************************************************************
  *           get_builtin_unix_funcs
@@ -2579,7 +2609,8 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
  * virtual_mutex must be held by caller.
  */
 static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start, size_t size,
-                                    off_t offset, unsigned int vprot, BOOL removable )
+                                    off_t offset, unsigned int vprot, BOOL removable,
+                                    BOOL force_anon )
 {
     char *map_addr, *host_addr;
     size_t map_size, host_size;
@@ -2602,6 +2633,16 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
         prot &= ~PROT_WRITE;
 #endif
     }
+
+    /* On strict-W^X kernels (e.g. Android arm64) and noexec filesystems (e.g.
+     * a FAT/exFAT SD card), a file-backed MAP_PRIVATE mapping that was ever
+     * writable cannot later be flipped to PROT_EXEC, which breaks Wine's PE
+     * loader after relocations. When the caller passes force_anon=TRUE for a
+     * private mapping, mark it removable so we skip the file mmap below and
+     * pread the contents into the existing anonymous view instead. Anonymous
+     * mappings have no W^X restriction. Shared mappings still need a real file
+     * mmap and must always pass force_anon=FALSE. */
+    if (force_anon && (flags & MAP_PRIVATE)) removable = TRUE;
 
     map_size = ROUND_SIZE( start, size, page_mask );
     map_addr = ROUND_ADDR( (char *)view->base + start, page_mask );
@@ -2959,9 +3000,14 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
  *
  * Map the header of a PE file into memory.
  */
-static NTSTATUS map_pe_header( void *ptr, size_t size, size_t map_size, int fd, BOOL *removable )
+static NTSTATUS map_pe_header( void *ptr, size_t size, size_t map_size, int fd, BOOL *removable,
+                              BOOL force_anon )
 {
     if (!size) return STATUS_INVALID_IMAGE_FORMAT;
+
+    /* Force the pread fallback path when the caller wants the entire PE image
+     * to come up as anonymous (W^X-safe) memory. */
+    if (force_anon) *removable = TRUE;
 
     map_size &= ~host_page_mask;
 
@@ -3261,7 +3307,7 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
  */
 static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRING *nt_name, int fd,
                                      struct pe_image_info *image_info, USHORT machine,
-                                     int shared_fd, BOOL removable )
+                                     int shared_fd, BOOL removable, BOOL force_anon )
 {
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
@@ -3284,7 +3330,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
     fstat( fd, &st );
     header_size = min( image_info->header_size, st.st_size );
     header_map_size = min( image_info->header_map_size, ROUND_SIZE( 0, st.st_size, host_page_mask ));
-    if ((status = map_pe_header( view->base, header_size, header_map_size, fd, &removable )))
+    if ((status = map_pe_header( view->base, header_size, header_map_size, fd, &removable, force_anon )))
         return status;
 
     status = STATUS_INVALID_IMAGE_FORMAT;  /* generic error */
@@ -3314,7 +3360,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
 
         total_size = min( total_size, ROUND_SIZE( 0, st.st_size, page_mask ));
         if (map_file_into_view( view, fd, 0, total_size, 0, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
-                                removable ) != STATUS_SUCCESS) goto done;
+                                removable, force_anon ) != STATUS_SUCCESS) goto done;
 
         /* check that all sections are loaded at the right offset */
         if (nt->OptionalHeader.FileAlignment != nt->OptionalHeader.SectionAlignment) goto done;
@@ -3367,7 +3413,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
                             sec[i].PointerToRawData, (int)pos, file_size, map_size,
                             sec[i].Characteristics );
             if (map_file_into_view( view, shared_fd, sec[i].VirtualAddress, map_size, pos,
-                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE ) != STATUS_SUCCESS)
+                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE,
+                                    FALSE /* MAP_SHARED, never anon */ ) != STATUS_SUCCESS)
             {
                 ERR_(module)( "Could not map %s shared section %.8s\n", debugstr_us(nt_name), sec[i].Name );
                 goto done;
@@ -3383,7 +3430,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
                 if (end > base)
                     map_file_into_view( view, shared_fd, base, end - base,
                                         pos + (base - sec[i].VirtualAddress),
-                                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY, FALSE );
+                                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY, FALSE,
+                                        force_anon );
             }
             pos += map_size;
             continue;
@@ -3405,7 +3453,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
             end < file_start ||
             map_file_into_view( view, fd, sec[i].VirtualAddress, file_size, file_start,
                                 VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
-                                removable ) != STATUS_SUCCESS)
+                                removable, force_anon ) != STATUS_SUCCESS)
         {
             ERR_(module)( "Could not map %s section %.8s, file probably truncated\n",
                           debugstr_us(nt_name), sec[i].Name );
@@ -3463,6 +3511,19 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
 
             while (rel && rel < end - 1 && rel->SizeOfBlock && rel->VirtualAddress < total_size)
                 rel = process_relocation_block( ptr + rel->VirtualAddress, rel, delta );
+        }
+    }
+
+    /* Round up executable section VirtualSize in the mapped header so the
+     * binary translator (FEX) tracks the full page-aligned range. Some DLLs
+     * (e.g. bink2w64.dll) keep code past VirtualSize but within SizeOfRawData,
+     * which FEX's section tracking would otherwise mark NoExec. */
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        if (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)
+        {
+            DWORD size = sec[i].Misc.VirtualSize ? sec[i].Misc.VirtualSize : sec[i].SizeOfRawData;
+            sec[i].Misc.VirtualSize = ROUND_SIZE( 0, size, align_mask );
         }
     }
 
@@ -3660,7 +3721,8 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
     status = map_image_view( &view, image_info, size, limit_low, limit_high, alloc_type );
     if (status) goto done;
 
-    status = map_image_into_view( view, nt_name, unix_fd, image_info, machine, shared_fd, needs_close );
+    status = map_image_into_view( view, nt_name, unix_fd, image_info, machine, shared_fd,
+                                  needs_close, TRUE );
     if (status == STATUS_SUCCESS)
     {
         if (offset)
@@ -3805,7 +3867,7 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
     if (res) goto done;
 
     TRACE( "handle=%p size=%lx offset=%s\n", handle, size, wine_dbgstr_longlong(offset.QuadPart) );
-    res = map_file_into_view( view, unix_handle, 0, size, offset.QuadPart, vprot, needs_close );
+    res = map_file_into_view( view, unix_handle, 0, size, offset.QuadPart, vprot, needs_close, FALSE );
     if (res == STATUS_SUCCESS)
     {
         /* file mappings must always be accessible */
@@ -6559,6 +6621,51 @@ static unsigned int get_memory_image_info( HANDLE process, LPCVOID addr, MEMORY_
 }
 
 
+#if defined(linux) && defined(__aarch64__)
+NTSTATUS get_memory_fex_stats_shm( HANDLE process, LPCVOID addr, MEMORY_FEX_STATS_SHM_INFORMATION *info,
+                                   SIZE_T len, SIZE_T *res_len)
+{
+    char buf[0x20];
+    int fd;
+    int oflag = O_RDWR;
+
+    if (len != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+    if (process != GetCurrentProcess()) return STATUS_INVALID_HANDLE;
+
+    sprintf( buf, "fex-%d-stats", getpid() );
+
+    if (!fex_stats_shm) {
+        fex_stats_shm = mmap( NULL, FEX_STATS_SHM_MAX_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS |
+                              MAP_NORESERVE, -1, 0 );
+        if (fex_stats_shm == MAP_FAILED) {
+            fex_stats_shm = NULL;
+            return STATUS_INTERNAL_ERROR;
+        }
+
+        oflag |= O_CREAT | O_TRUNC;
+    }
+
+    fd = shm_open( buf, oflag, S_IRWXU | S_IRWXG | S_IRWXO );
+    if (fd == -1) return STATUS_INTERNAL_ERROR;
+
+    if (ftruncate( fd, info->map_size )) goto err;
+
+    if (mmap( fex_stats_shm, info->map_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd,
+              0 ) == MAP_FAILED) goto err;
+
+    close( fd );
+
+    info->shm_base = fex_stats_shm;
+    *res_len = len;
+    return STATUS_SUCCESS;
+
+err:
+    close( fd );
+    return STATUS_INTERNAL_ERROR;
+}
+#endif
+
+
 /***********************************************************************
  *             NtQueryVirtualMemory   (NTDLL.@)
  *             ZwQueryVirtualMemory   (NTDLL.@)
@@ -6602,6 +6709,44 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
                 return status;
             }
             return STATUS_INVALID_HANDLE;
+
+        case MemoryWineLoadUnixLibByName:
+        case MemoryWineLoadUnixLibByNameWow64:
+            if (process == GetCurrentProcess())
+            {
+                UINT64 res[2];
+                const UNICODE_STRING *name = addr;
+                const void *funcs;
+                void *handle;
+
+                if ((status = load_unixlib_by_name( name, &handle ))) return status;
+                res[0] = (UINT_PTR)handle;
+                if (len >= sizeof(res))
+                {
+                    if (!(status = get_unixlib_funcs( handle, info_class == MemoryWineLoadUnixLibByNameWow64, &funcs )))
+                        res[1] = (UINT_PTR)funcs;
+                }
+                if (status) dlclose( handle );
+                else memcpy( buffer, res, min( len, sizeof(res) ));
+                return status;
+            }
+            return STATUS_INVALID_HANDLE;
+
+        case MemoryWineUnloadUnixLib:
+            if (process == GetCurrentProcess())
+            {
+                const unixlib_module_t *handle = addr;
+
+                if (!dlclose( (void *)(UINT_PTR)*handle )) return STATUS_SUCCESS;
+            }
+            return STATUS_INVALID_HANDLE;
+
+        case MemoryFexStatsShm:
+#if defined(linux) && defined(__aarch64__)
+            return get_memory_fex_stats_shm( process, addr, buffer, len, res_len );
+#else
+            return STATUS_INVALID_INFO_CLASS;
+#endif
 
         default:
             FIXME("(%p,%p,info_class=%d,%p,%ld,%p) Unknown information class\n",
