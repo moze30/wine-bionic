@@ -393,6 +393,17 @@
 /* Define to 1 if 'interface_id' is a member of 'sg_io_hdr_t'. */
 #undef HAVE_SG_IO_HDR_T_INTERFACE_ID
 
+/* Define to 1 if you have the <shm/drivers/game_controller_driver.h> header
+   file. */
+#undef HAVE_SHM_DRIVERS_GAME_CONTROLLER_DRIVER_H
+
+/* Define to 1 if you have the <shm/drivers/midi_driver.h> header file. */
+#undef HAVE_SHM_DRIVERS_MIDI_DRIVER_H
+
+/* Define to 1 if you have the <shm/drivers/task_manager_driver.h> header
+   file. */
+#undef HAVE_SHM_DRIVERS_TASK_MANAGER_DRIVER_H
+
 /* Define to 1 if 'si_fd' is a member of 'siginfo_t'. */
 #undef HAVE_SIGINFO_T_SI_FD
 
@@ -660,6 +671,9 @@
 /* Define to 1 if the Wine preloader is being used. */
 #undef HAVE_WINE_PRELOADER
 
+/* Define to 1 if you have the <winfusion_utils.h> header file. */
+#undef HAVE_WINFUSION_UTILS_H
+
 /* Define to 1 if you have the <X11/extensions/shape.h> header file. */
 #undef HAVE_X11_EXTENSIONS_SHAPE_H
 
@@ -841,5 +855,8 @@
 
 /* Define to 1 on platforms where this makes time_t a 64-bit type. */
 #undef __MINGW_USE_VC2005_COMPAT
+
+/* Define if building for WinFusion */
+#undef __WINFUSION__
 
 #endif /* __WINE_CONFIG_H */

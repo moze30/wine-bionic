@@ -1,0 +1,5 @@
+# automake/autoconf 缓存
+autom4te.cache/
+
+# 编辑器/工具生成的备份文件
+*~
