@@ -474,6 +474,13 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UIN
     data->is_fullscreen = fullscreen;
     data->managed = managed;
 
+    /* xdg_toplevel.set_minimized is only a compositor hint and may leave
+     * the last committed buffer visible. Detach and destroy the toplevel
+     * while the Win32 window is iconic; the normal restore path recreates
+     * it on the next WindowPosChanged with a real window surface. */
+    if (NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)
+        surface = NULL;
+
     if (!surface)
     {
         if ((client = data->client_surface))
